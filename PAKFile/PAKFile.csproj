@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+	  <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ControlExtensions\ControlExtensions.csproj" />
+    <ProjectReference Include="..\PluginContracts\PluginContracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="PAKInterface.cs">
+      <SubType>Form</SubType>
+    </Compile>
+  </ItemGroup>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="xcopy /Y /I &quot;$(TargetPath)&quot; &quot;$(SolutionDir)HBPakEditor\bin\$(Configuration)\$(TargetFramework)\Plugins\&quot;" />
+  </Target>
+
+</Project>
