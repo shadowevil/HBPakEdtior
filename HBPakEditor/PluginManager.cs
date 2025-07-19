@@ -107,5 +107,20 @@ namespace HBPakEdtior
                 }
             }
         }
+
+        public bool OnMainWindowClosing()
+        {
+            foreach (var plugin in _plugins)
+            {
+                if (plugin is IPluginMainWindowClosing closingPlugin)
+                {
+                    if (!closingPlugin.OnMainWindowClosing())
+                    {
+                        return false; // If any plugin cancels the closing, return false
+                    }
+                }
+            }
+            return true; // All plugins allowed the closing
+        }
     }
 }

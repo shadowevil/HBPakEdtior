@@ -51,7 +51,6 @@ namespace HBPakEdtior
             splitContainer1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)splitContainer2).BeginInit();
             splitContainer2.Panel1.SuspendLayout();
-            splitContainer2.Panel2.SuspendLayout();
             splitContainer2.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)pbSpriteImage).BeginInit();
             pbImageControlBar.SuspendLayout();
@@ -77,8 +76,9 @@ namespace HBPakEdtior
             // closeToolStripMenuItem
             // 
             closeToolStripMenuItem.Name = "closeToolStripMenuItem";
-            closeToolStripMenuItem.Size = new Size(206, 26);
+            closeToolStripMenuItem.Size = new Size(224, 26);
             closeToolStripMenuItem.Text = "Close";
+            closeToolStripMenuItem.Click += closeToolStripMenuItem_Click;
             // 
             // darkModeToolStripMenuItem
             // 
@@ -152,9 +152,6 @@ namespace HBPakEdtior
             // 
             splitContainer2.Panel1.Controls.Add(pbSpriteImage);
             splitContainer2.Panel1.Controls.Add(pbImageControlBar);
-            // 
-            // splitContainer2.Panel2
-            // 
             splitContainer2.Panel2MinSize = 128;
             splitContainer2.Size = new Size(542, 376);
             splitContainer2.SplitterDistance = 244;
@@ -211,7 +208,6 @@ namespace HBPakEdtior
             splitContainer1.ResumeLayout(false);
             splitContainer2.Panel1.ResumeLayout(false);
             splitContainer2.Panel1.PerformLayout();
-            splitContainer2.Panel2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)splitContainer2).EndInit();
             splitContainer2.ResumeLayout(false);
             ((System.ComponentModel.ISupportInitialize)pbSpriteImage).EndInit();

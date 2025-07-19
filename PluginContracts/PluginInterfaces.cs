@@ -11,6 +11,11 @@ namespace PluginContracts
         public void OnMainWindowLoaded();
     }
 
+    public interface IPluginMainWindowClosing
+    {
+        public bool OnMainWindowClosing();
+    }
+
     public interface IPluginMainWindowResize
     {
         public void OnWindowResize();

@@ -17,7 +17,7 @@ namespace HBPakEditor
         private Dictionary<TabPage, bool> _tabDirtyStates = new Dictionary<TabPage, bool>();
         private readonly Dictionary<TabPage, ContextMenuStrip> _tabPageMenus = new();
 
-        private bool IsTabDirty(TabPage tabPage)
+        public bool IsTabDirty(TabPage tabPage)
         {
             return _tabDirtyStates.TryGetValue(tabPage, out bool isDirty) && isDirty;
         }

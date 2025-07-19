@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
@@ -111,7 +112,7 @@ namespace HBPakEdtior
 
         void IPluginMainWindow.OnTabPageAddition(TabPage page)
         {
-            if(tabControl1.TabPages.Contains(_emptyTab))
+            if (tabControl1.TabPages.Contains(_emptyTab))
             {
                 tabControl1.TabPages.Clear();
                 tabControl1.TabPages.Add(page);
@@ -164,6 +165,27 @@ namespace HBPakEdtior
             base.OnResize(e);
 
             _pluginManager?.OnWindowResize();
+        }
+
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            base.OnClosing(e);
+            e.Cancel = _pluginManager.OnMainWindowClosing();
+        }
+
+        private void closeToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            this.Close();
+        }
+
+        public bool IsTabDirty(TabPage page)
+        {
+            return tabControl1.IsTabDirty(page);
+        }
+
+        public void SetTabDirty(TabPage page, bool isDirty)
+        {
+            tabControl1.SetTabDirty(page, isDirty);
         }
     }
 }

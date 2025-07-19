@@ -17,6 +17,19 @@ namespace PAKFile
         private PAK()
         { }
 
+        public static PAK CreateNewPak()
+        {
+            PAK pak = new PAK
+            {
+                pakFileHeader = PAKFileHeader.GetDefaultHeader(),
+                SpriteCount = 0,
+                SpriteEntryOffsets = new List<int>(),
+                SpriteEntryEndsets = new List<int>(),
+                Sprites = new List<Sprite>()
+            };
+            return pak;
+        }
+
         public static PAK OpenPakFile(string path)
         {
             PAK pak = new PAK();

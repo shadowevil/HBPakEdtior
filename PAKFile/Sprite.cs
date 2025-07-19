@@ -12,10 +12,80 @@ namespace PAKFile
     public class Sprite
     {
         public List<SpriteRectangle> spriteRectangles { get; set; } = null!;
+
         public Bitmap? sprite = null;
 
         private Sprite()
         { }
+
+        public void GetAcceptedImageFileTypes(out string extension, out string Filter)
+        {
+            extension = sprite!.RawFormat.Guid switch
+            {
+                var g when g == ImageFormat.Png.Guid => ".png",
+                var g when g == ImageFormat.Bmp.Guid => ".bmp",
+                var g when g == ImageFormat.Jpeg.Guid => ".jpg",
+                var g when g == ImageFormat.Gif.Guid => ".gif",
+                var g when g == ImageFormat.Tiff.Guid => ".tiff",
+                var g when g == ImageFormat.Icon.Guid => ".ico",
+                var g when g == ImageFormat.Wmf.Guid => ".wmf",
+                var g when g == ImageFormat.Emf.Guid => ".emf",
+                var g when g == ImageFormat.Exif.Guid => ".exif",
+                var g when g == ImageFormat.MemoryBmp.Guid => ".bmp",
+                var g when g == ImageFormat.Webp.Guid => ".webp",
+                var g when g == ImageFormat.Heif.Guid => ".heif",
+                _ => throw new NotSupportedException("Unsupported image format.")
+            };
+            Filter = $"Image Files (*{extension})|*{extension}";
+        }
+
+        public static void GetAllAcceptedImageFileTypes(out string extensions, out string filter)
+        {
+            var formats = new List<ImageFormat>
+            {
+                ImageFormat.Png,
+                ImageFormat.Bmp,
+                ImageFormat.Jpeg,
+                ImageFormat.Gif,
+                ImageFormat.Tiff,
+                ImageFormat.Icon,
+                ImageFormat.Wmf,
+                ImageFormat.Emf,
+                ImageFormat.Exif,
+                ImageFormat.MemoryBmp,
+                ImageFormat.Webp,
+                ImageFormat.Heif
+            };
+            extensions = string.Join(";", formats.Select(f => $"*{f.ToString()}"));
+            filter = $"Image Files ({extensions})|{extensions}";
+        }
+
+        public void ExportSprite()
+        {
+            using SaveFileDialog sfd = new SaveFileDialog
+            {
+                Title = "Export Sprite",
+                RestoreDirectory = true
+            };
+
+            byte[] bytes = SaveBitmapToByteArrayAuto(sprite!);
+            GetAcceptedImageFileTypes(out string extension, out string filter);
+            sfd.Filter = filter;
+
+            if (sfd.ShowDialog() != DialogResult.OK)
+                return;
+
+            string newPath = Path.ChangeExtension(sfd.FileName, extension);
+            File.WriteAllBytes(newPath, bytes);
+        }
+
+        public static Sprite CreateNewSprite(Bitmap bmp)
+        {
+            Sprite sprite = new Sprite();
+            sprite.spriteRectangles = new List<SpriteRectangle>();
+            sprite.sprite = bmp;
+            return sprite;
+        }
 
         public static Sprite ReadFromStream(EndianBinaryReader reader)
         {

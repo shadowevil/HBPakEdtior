@@ -15,5 +15,7 @@ namespace PluginContracts.HostInterfaces
         List<string> OpenState { get; set; }
         List<string> ClosedState { get; set; }
         void OnTabPageAddition(TabPage page);
+        bool IsTabDirty(TabPage page);
+        void SetTabDirty(TabPage page, bool isDirty);
     }
 }
