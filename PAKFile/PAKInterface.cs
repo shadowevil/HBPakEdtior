@@ -119,11 +119,8 @@ namespace PAKFile
                 return;
             }
 
-            if (_pakFiles.TryGetValue(tab, out var pakFile) && string.IsNullOrWhiteSpace(pakFile.FilePath))
-            {
-                // Prompt for save location if not already set
+            if (!_pakFiles.TryGetValue(tab, out var pakFile))
                 return;
-            }
 
             if (tab == null || !_pakFiles.ContainsKey(tab))
             {
