@@ -1,21 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Drawing.Imaging;
-using System.Linq;
+﻿using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace PAKFile
 {
-
-    public class Sprite
+    public class Spritea
     {
         public List<SpriteRectangle> spriteRectangles { get; set; } = null!;
 
         public Bitmap? sprite = null;
 
-        private Sprite()
+        private Spritea()
         { }
 
         public void GetAcceptedImageFileTypes(out string extension, out string Filter)
@@ -26,14 +20,6 @@ namespace PAKFile
                 var g when g == ImageFormat.Bmp.Guid => ".bmp",
                 var g when g == ImageFormat.Jpeg.Guid => ".jpg",
                 var g when g == ImageFormat.Gif.Guid => ".gif",
-                var g when g == ImageFormat.Tiff.Guid => ".tiff",
-                var g when g == ImageFormat.Icon.Guid => ".ico",
-                var g when g == ImageFormat.Wmf.Guid => ".wmf",
-                var g when g == ImageFormat.Emf.Guid => ".emf",
-                var g when g == ImageFormat.Exif.Guid => ".exif",
-                var g when g == ImageFormat.MemoryBmp.Guid => ".bmp",
-                var g when g == ImageFormat.Webp.Guid => ".webp",
-                var g when g == ImageFormat.Heif.Guid => ".heif",
                 _ => throw new NotSupportedException("Unsupported image format.")
             };
             Filter = $"Image Files (*{extension})|*{extension}";
@@ -46,15 +32,7 @@ namespace PAKFile
                 ImageFormat.Png,
                 ImageFormat.Bmp,
                 ImageFormat.Jpeg,
-                ImageFormat.Gif,
-                ImageFormat.Tiff,
-                ImageFormat.Icon,
-                ImageFormat.Wmf,
-                ImageFormat.Emf,
-                ImageFormat.Exif,
-                ImageFormat.MemoryBmp,
-                ImageFormat.Webp,
-                ImageFormat.Heif
+                ImageFormat.Gif
             };
             extensions = string.Join(";", formats.Select(f => $"*{f.ToString()}"));
             filter = $"Image Files ({extensions})|{extensions}";
@@ -93,7 +71,7 @@ namespace PAKFile
             {
                 throw new InvalidDataException("Invalid sprite file header magic.");
             }
-            reader.Skip(100 - SpriteHeader.GetDefaultHeader().Magic.Length);
+            reader.Skip(80);
 
             Sprite sprite = new Sprite();
             int rectangleCount = reader.ReadInt32();
@@ -109,18 +87,24 @@ namespace PAKFile
                 rectangle.pivotY = reader.ReadInt16();
                 sprite.spriteRectangles.Add(rectangle);
             }
-            
-            BmpHeader bmpHeader = BmpHeader.ReadFromStream(reader);
 
-            sprite.sprite = LoadBitmapFromStream(reader, bmpHeader);
+            _ = reader.ReadBytes(4);
+
+            ImageHeaderInfo info = ImageHeaderReader.ReadHeader(reader);
+
+            if (info.Format == ImageFormat.Bmp && info.fileSize == 0)
+            {
+                BmpHeader bmpHeader = BmpHeader.ReadFromStream(reader);
+                info.fileSize = bmpHeader.BfSize;
+            }
+            sprite.sprite = LoadBitmapFromStream(reader, info);
 
             return sprite;
         }
 
-        private static Bitmap LoadBitmapFromStream(EndianBinaryReader reader, BmpHeader header)
+        private static Bitmap LoadBitmapFromStream(EndianBinaryReader reader, ImageHeaderInfo header)
         {
-            reader.Seek(-54, SeekOrigin.Current);
-            byte[] bmpBytes = reader.ReadBytes((int)header.BfSize);
+            byte[] bmpBytes = reader.ReadBytes((int)header.fileSize);
             using var ms = new MemoryStream(bmpBytes);
             return new Bitmap(ms);
         }
@@ -140,8 +124,9 @@ namespace PAKFile
                 writer.Write(rectangle.pivotY);
             }
 
-            writer.Write(new byte[4]);
-            writer.Write(SaveBitmapToByteArrayAuto(sprite!));
+            byte[] spriteBytes = SaveBitmapToByteArrayAuto(sprite!);
+            writer.Write((uint)spriteBytes.Length);
+            writer.Write(spriteBytes);
         }
 
         public static byte[] SaveBitmapToByteArrayAuto(Bitmap bitmap)
@@ -222,6 +207,97 @@ namespace PAKFile
                 bitmap.UnlockBits(data);
                 return ms.ToArray();
             }
+        }
+
+        public static Bitmap ConvertTo8bppBitmap(Bitmap source)
+        {
+            if (source.PixelFormat == PixelFormat.Format8bppIndexed)
+                return source;
+
+            int width = source.Width;
+            int height = source.Height;
+            Bitmap preprocessed = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+
+            bool IsPremultiplied(Color c) => c.A == 0 || (c.R <= c.A && c.G <= c.A && c.B <= c.A);
+
+            // Sample check for premultiplication
+            bool premultiplied = true;
+            for (int y = 0; y < Math.Min(height, 16); y++)
+            {
+                for (int x = 0; x < Math.Min(width, 16); x++)
+                {
+                    if (!IsPremultiplied(source.GetPixel(x, y)))
+                    {
+                        premultiplied = false;
+                        break;
+                    }
+                }
+                if (!premultiplied) break;
+            }
+
+            // Preprocess pixels
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    Color src = source.GetPixel(x, y);
+                    if (src.A == 0)
+                    {
+                        preprocessed.SetPixel(x, y, Color.Fuchsia);
+                    }
+                    else if (src.A < 255 && !premultiplied)
+                    {
+                        byte r = (byte)((src.R * src.A) / 255);
+                        byte g = (byte)((src.G * src.A) / 255);
+                        byte b = (byte)((src.B * src.A) / 255);
+                        preprocessed.SetPixel(x, y, Color.FromArgb(r, g, b));
+                    }
+                    else
+                    {
+                        preprocessed.SetPixel(x, y, Color.FromArgb(src.R, src.G, src.B));
+                    }
+                }
+            }
+
+            var quantizer = new OctreeQuantizer(256);
+            Bitmap quantized = quantizer.Quantize(preprocessed);
+
+            // Ensure palette index 0 is fuchsia
+            ColorPalette palette = quantized.Palette;
+
+            // Only replace index 0 with fuchsia if it's already present in the image
+            for (int i = 0; i < palette.Entries.Length; i++)
+            {
+                if (palette.Entries[i].ToArgb() == Color.Fuchsia.ToArgb())
+                {
+                    palette.Entries[i] = Color.Fuchsia;
+                    break;
+                }
+            }
+
+            quantized.Palette = palette;
+
+            return quantized;
+        }
+
+        public Bitmap? ImportSprite()
+        {
+            using OpenFileDialog ofd = new OpenFileDialog
+            {
+                Title = "Import Sprite",
+                RestoreDirectory = true,
+                Multiselect = false,
+                CheckFileExists = true,
+                CheckPathExists = true
+            };
+            GetAllAcceptedImageFileTypes(out string extension, out string filter);
+            ofd.Filter = filter;
+            if (ofd.ShowDialog() != DialogResult.OK)
+                return null;
+
+            string filePath = ofd.FileName;
+            sprite = new Bitmap(filePath);
+            return sprite;
         }
     }
 }

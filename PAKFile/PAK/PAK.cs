@@ -2,7 +2,7 @@
 
 namespace PAKFile
 {
-    public class PAK
+    public class PAKa
     {
         public const string FilePattern = "PAK Files (*.pak)|*.pak";
 

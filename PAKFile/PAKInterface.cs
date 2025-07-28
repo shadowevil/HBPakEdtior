@@ -1,21 +1,16 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Formats.Tar;
-using System.Linq;
-using System.Net.NetworkInformation;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Forms;
+﻿using Newtonsoft.Json;
+using PAKLib;
 using PluginContracts;
 using PluginContracts.HostInterfaces;
+using System.ComponentModel;
+using System.Drawing.Imaging;
+using System.Security.Policy;
 
 namespace PAKFile
 {
     public partial class PAKInterface : IPlugin, IPluginTabIndexChanged, IPluginMainWindowLoaded, IPluginMainWindowResize, IPluginMainWindowClosing
     {
-        private Dictionary<TabPage, PAK> _pakFiles = new Dictionary<TabPage, PAK>();
-        public const string AllFilesPattern = "All Files (*.*)|*.*";
+        private Dictionary<TabPage, (string, PAK)> _pakFiles = new Dictionary<TabPage, (string, PAK)>();
         private IPluginHostPublic PluginHost = null!;
         IPluginHostPublic? IPlugin.PluginHost => PluginHost;
         public string Name => "PAK Interface Plugin";
@@ -35,17 +30,29 @@ namespace PAKFile
         private StatusStrip? statusStrip = null;
         private ToolStripStatusLabel? scaleLabel = null;
         private ToolStripStatusLabel? imageSizeLabel = null;
-        private ToolStripStatusLabel? imageFormatLabel = null;
+        private ToolStripButton? imageFormatButton = null;
 
-        private TextBox? numPivY    = null;
-        private TextBox? numHeight  = null;
-        private TextBox? numY       = null;
-        private TextBox? numPivX    = null;
-        private TextBox? numWidth   = null;
-        private TextBox? numX       = null;
+        private TextBox? numPivY = null;
+        private TextBox? numHeight = null;
+        private TextBox? numY = null;
+        private TextBox? numPivX = null;
+        private TextBox? numWidth = null;
+        private TextBox? numX = null;
 
         private Pen _selectionPen = new Pen(Color.Yellow, 1);
         private Pen _unselectedPen = new Pen(Color.Red, 1);
+
+        public const string AllFilesPattern = "All Files (*.*)|*.*";
+        public const string PAKFilePattern = "PAK Files (*.pak)|*.pak";
+        public string AcceptedImageFilePatterns => string.Join("|", (IEnumerable<string>)[
+            "All Supported Image Files|*.bmp;*.png;*.jpg;*.jpeg;*.gif",
+            "Bitmap Files (*.bmp)|*.bmp",
+            "PNG Files (*.png)|*.png",
+            "JPEG Files (*.jpg;*.jpeg)|*.jpg;*.jpeg",
+            "GIF Files (*.gif)|*.gif",
+            AllFilesPattern
+        ]);
+
 
         public PAKInterface(IPluginHostPublic pluginHost)
         {
@@ -55,7 +62,8 @@ namespace PAKFile
         private void newToolStripMenuItem_Click(object? sender, EventArgs e)
         {
             TabPage newTab = CopyTemplateTab("New PAK File", "NewPakFile");
-            _pakFiles[newTab] = PAK.CreateNewPak();
+            _pakFiles[newTab] = (string.Empty, new PAK());
+            _pakFiles[newTab].Item2.Data = new PAKData();
             _mainWindow!.OnTabPageAddition(newTab);
             LoadSelectedTab(newTab);
         }
@@ -64,86 +72,99 @@ namespace PAKFile
         {
             using OpenFileDialog ofd = new OpenFileDialog();
 
-            ofd.Filter = $"{PAK.FilePattern}|{AllFilesPattern}";
+            ofd.Filter = $"{PAKFilePattern}|{AllFilesPattern}";
             ofd.Title = "Open PAK File";
             ofd.Multiselect = false;
             ofd.RestoreDirectory = true;
             if (ofd.ShowDialog() == DialogResult.OK)
             {
-                string filePath = ofd.FileName;
-                TabPage newTab = CopyTemplateTab(Path.GetFileName(filePath), Path.GetFileNameWithoutExtension(filePath).Replace(" ", ""));
-                _pakFiles[newTab] = PAK.OpenPakFile(filePath);
-                _mainWindow!.OnTabPageAddition(newTab);
-                LoadSelectedTab(newTab);
+                OpenPAKFile(ofd.FileName);
             }
+        }
+
+        private void OpenPAKFile(string filePath)
+        {
+            TabPage newTab = CopyTemplateTab(Path.GetFileName(filePath), Path.GetFileNameWithoutExtension(filePath).Replace(" ", ""));
+            _pakFiles[newTab] = (filePath, PAK.ReadFromFile(filePath));
+            _mainWindow!.OnTabPageAddition(newTab);
+            LoadSelectedTab(newTab);
         }
 
         private void saveToolStripMenuItem_Click(object? sender, EventArgs e)
         {
-            var tab = _selectedTab;
-            if(tab == null)
-            {
-                MessageBox.Show("No tab selected.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (!PrecheckSelectedTab(out string? FilePath, out PAK? pakFile, out TabPage? tab))
                 return;
-            }
 
-            if (_pakFiles.TryGetValue(tab, out var pakFile) && string.IsNullOrWhiteSpace(pakFile.FilePath))
+            if (string.IsNullOrWhiteSpace(FilePath))
             {
                 saveAsToolStripMenuItem_Click(sender, e);
                 return;
             }
 
-            if (tab == null || !_pakFiles.ContainsKey(tab))
-            {
-                MessageBox.Show("No tab selected or PAK file not loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            if (pakFile == null)
-            {
-                MessageBox.Show("PAK file not loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            pakFile.Save(pakFile.FilePath);
-            _mainWindow!.SetTabDirty(tab, false);
-            MessageBox.Show($"PAK file saved successfully to {Path.GetFileName(pakFile.FilePath)}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            pakFile!.Data!.Write(FilePath);
+            _mainWindow!.SetTabDirty(tab!, false);
         }
 
-        private void saveAsToolStripMenuItem_Click(object? sender, EventArgs e)
+        private bool PrecheckSelectedTab(out string? outFilePath, out PAK? outPakFile, out TabPage? outTab)
         {
             var tab = _selectedTab;
             if (tab == null)
             {
                 MessageBox.Show("No tab selected.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                outFilePath = null;
+                outPakFile = null;
+                outTab = null;
+                return false;
             }
 
-            if (!_pakFiles.TryGetValue(tab, out var pakFile))
-                return;
+            string? internalFilePath = null;
+            PAK? internalPakFile = null;
+            if (_pakFiles.TryGetValue(tab, out var entry))
+            {
+                internalFilePath = entry.Item1;
+                internalPakFile = entry.Item2;
+            }
 
-            if (tab == null || !_pakFiles.ContainsKey(tab))
+            if (!_pakFiles.ContainsKey(tab))
             {
                 MessageBox.Show("No tab selected or PAK file not loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                outFilePath = null;
+                outPakFile = null;
+                outTab = null;
+                return false;
             }
 
-            if (pakFile == null)
+            if (internalPakFile == null || internalPakFile.Data == null
+                && internalFilePath == null)
             {
                 MessageBox.Show("PAK file not loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
+                outFilePath = null;
+                outPakFile = null;
+                outTab = null;
+                return false;
             }
+
+            outFilePath = internalFilePath;
+            outPakFile = internalPakFile;
+            outTab = tab;
+            return true;
+        }
+
+        private void saveAsToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            if (!PrecheckSelectedTab(out string? FilePath, out PAK? pakFile, out TabPage? tab))
+                return;
 
             using SaveFileDialog sfd = new SaveFileDialog();
 
-            sfd.Filter = $"{PAK.FilePattern}|{AllFilesPattern}";
+            sfd.Filter = $"{PAKFilePattern}|{AllFilesPattern}";
             sfd.Title = "Save PAK File";
             sfd.FileName = tab.Text.Trim('*');
             sfd.RestoreDirectory = true;
             if (sfd.ShowDialog() != DialogResult.OK)
                 return;
 
-            pakFile.Save(sfd.FileName);
+            pakFile!.Data!.Write(sfd.FileName);
             _mainWindow!.SetTabDirty(tab, false);
             MessageBox.Show($"PAK file saved successfully to {Path.GetFileName(sfd.FileName)}", "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
@@ -164,16 +185,49 @@ namespace PAKFile
             };
             scaleLabel = new ToolStripStatusLabel("95.00%");
             imageSizeLabel = new ToolStripStatusLabel("0x0");
-            imageFormatLabel = new ToolStripStatusLabel("Unknown");
+            imageFormatButton = new ToolStripButton("Unknown")
+            {
+                DisplayStyle = ToolStripItemDisplayStyle.Text,
+                Name = "imageFormatButton",
+                ToolTipText = $"Change Pixel Format to {PixelFormat.Format8bppIndexed.ToString()}"
+            };
+            imageFormatButton.Click += ChangeImageFormat_Click;
             statusStrip.Items.AddRange([
                 scaleLabel,
                 new ToolStripSeparator(),
                 imageSizeLabel,
                 new ToolStripSeparator(),
-                imageFormatLabel
+                imageFormatButton
             ]);
             container.Panel1.Controls.Add(statusStrip);
             return newTab;
+        }
+
+        private void ChangeImageFormat_Click(object? sender, EventArgs e)
+        {
+            //if (!LoadSelectedTabControls())
+            //    return;
+
+            //if (spriteTreeView == null || pbSpriteImage == null || imageFormatButton == null)
+            //{
+            //    MessageBox.Show("UI components not initialized.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            //    return;
+            //}
+
+            //TreeNode? selectedNode = spriteTreeView.SelectedNode;
+            //if (selectedNode == null || selectedNode.Tag is not Sprite sprite)
+            //{
+            //    MessageBox.Show("No sprite selected.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            //    return;
+            //}
+            //if (sprite.data == null)
+            //{
+            //    MessageBox.Show("Sprite image is not loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            //    return;
+            //}
+            //// Change the pixel format of the sprite
+            //sprite.sprite = Sprite.ConvertTo8bppBitmap(sprite.sprite);
+            //pbSpriteImage.Image = sprite.sprite;
         }
 
         public void LoadSelectedTab(TabPage selectedTab)
@@ -181,24 +235,21 @@ namespace PAKFile
             if (!LoadSelectedTabControls())
                 return;
 
-            if (selectedTab == null || spriteTreeView == null)
+            if (!PrecheckSelectedTab(out string? _, out PAK? pakFile, out TabPage? _))
+                return;
+
+            if (spriteTreeView == null)
             {
                 MessageBox.Show("No tab selected.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
-            if (!_pakFiles.TryGetValue(selectedTab, out var pak) || pak == null)
-            {
-                MessageBox.Show("Failed to load PAK file.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
             var nodes = spriteTreeView.Nodes;
             nodes.Clear();
 
-            for (int i = 0; i < pak.Sprites.Count; i++)
+            for (int i = 0; i < pakFile!.Data!.Sprites.Count; i++)
             {
-                AddSprite(pak.Sprites[i], pak.Sprites[i].spriteRectangles, true);
+                AddSprite(pakFile.Data.Sprites[i], pakFile.Data.Sprites[i].Rectangles, true);
             }
         }
 
@@ -216,15 +267,12 @@ namespace PAKFile
                 return;
             }
 
-            if (_selectedTab == null || !_pakFiles.TryGetValue(_selectedTab, out var pak))
-            {
-                MessageBox.Show("No PAK file loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (!PrecheckSelectedTab(out string? _, out PAK? pakFile, out TabPage? tab))
                 return;
-            }
 
-            pak.Sprites.Remove(sprite);
+            pakFile!.Data!.Sprites.Remove(sprite);
             spriteTreeView.Nodes.Remove(node);
-            _mainWindow!.SetTabDirty(_selectedTab, true);
+            _mainWindow!.SetTabDirty(tab!, true);
         }
         private void RemoveRectangle(TreeNode node)
         {
@@ -240,47 +288,46 @@ namespace PAKFile
                 return;
             }
 
-            if (_selectedTab == null || !_pakFiles.TryGetValue(_selectedTab, out var pak))
-            {
-                MessageBox.Show("No PAK file loaded.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
             if (node.Parent?.Tag is not Sprite sprite)
             {
                 MessageBox.Show("No sprite found for the selected rectangle.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
-            sprite.spriteRectangles.Remove(rect);
+            if (!PrecheckSelectedTab(out string? _, out PAK? _, out TabPage? tab))
+                return;
+
+            sprite.Rectangles.Remove(rect);
             node.Remove();
-            _mainWindow!.SetTabDirty(_selectedTab, true);
+            _mainWindow!.SetTabDirty(tab!, true);
         }
 
         private void AddSprite(Sprite sprite, List<SpriteRectangle> rects, bool nodeOnly = false)
         {
-            if(spriteTreeView == null)
+            var tab = _selectedTab;
+
+            if (spriteTreeView == null)
             {
                 MessageBox.Show("Sprite TreeView not initialized.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
 
             if(!nodeOnly)
-                _pakFiles[_selectedTab!].Sprites.Add(sprite);
+                _pakFiles[tab!].Item2.Data!.Sprites.Add(sprite);
             var spriteNode = new TreeNode($"Sprite {spriteTreeView.Nodes.Count}") { Tag = sprite };
             foreach (var rect in rects)
             {
                 AddRectangle(spriteNode, sprite, rect, nodeOnly);
             }
             spriteTreeView.Nodes.Add(spriteNode);
-            _mainWindow!.SetTabDirty(_selectedTab!, true);
+            _mainWindow!.SetTabDirty(tab!, true);
         }
 
         private void AddRectangle(TreeNode node, Sprite sprite, SpriteRectangle rect, bool nodeOnly = false)
         {
             if (!nodeOnly)
             {
-                sprite.spriteRectangles.Add(rect);
+                sprite.Rectangles.Add(rect);
             }
             node.Nodes.Add(new TreeNode((node.Nodes.Count).ToString()) { Tag = rect });
             pbSpriteImage?.Invalidate();
@@ -400,8 +447,8 @@ namespace PAKFile
                 {
                     spriteTreeView!.SelectedNode = node;
 
-                    Sprite? sprite = node.Tag as Sprite;
-                    SpriteRectangle? spriteRectangle = node.Tag as SpriteRectangle;
+                    Sprite? sprite = node.Tag switch { Sprite s => s, _ => null };
+                    SpriteRectangle? spriteRectangle = node.Tag switch { SpriteRectangle r => r, _ => null };
 
                     if (sprite != null)
                     {
@@ -420,9 +467,39 @@ namespace PAKFile
                                 AddRectangle(node, sprite, newRect, false);
                             }),
                             new ToolStripSeparator(),
+                            new ToolStripMenuItem("Import Sprite", null, (s, ev) => {
+                                using OpenFileDialog ofd = new OpenFileDialog
+                                {
+                                    Title = "Select an Image",
+                                    Multiselect = false,
+                                    RestoreDirectory = true
+                                };
+                                ofd.Filter = AcceptedImageFilePatterns;
+                                if (ofd.ShowDialog() != DialogResult.OK)
+                                    return;
+
+                                sprite.data = File.ReadAllBytes(ofd.FileName);
+                                using (MemoryStream ms = new MemoryStream(sprite.data))
+                                {
+                                    pbSpriteImage!.Image = new Bitmap(ms);
+                                }
+                            }),
                             new ToolStripMenuItem("Export Sprite", null, (s, ev) =>
                             {
-                                sprite.ExportSprite();
+                                using SaveFileDialog sfd = new SaveFileDialog
+                                {
+                                    Title = "Export Sprite",
+                                    Filter = AcceptedImageFilePatterns,
+                                    RestoreDirectory = true
+                                };
+                                if (sfd.ShowDialog() != DialogResult.OK)
+                                    return;
+                                if (pbSpriteImage?.Image == null)
+                                {
+                                    MessageBox.Show("No sprite image to export.", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                                    return;
+                                }
+                                DoExportSprite(sprite.data, sfd.FileName);
                             }),
                             new ToolStripSeparator(),
                             new ToolStripMenuItem("Remove Sprite", null, (s, ev) => RemoveSprite(node))
@@ -446,16 +523,40 @@ namespace PAKFile
                                 Multiselect = false,
                                 RestoreDirectory = true
                             };
-                            Sprite.GetAllAcceptedImageFileTypes(out string extension, out string filter);
-                            ofd.Filter = filter;
+                            ofd.Filter = AcceptedImageFilePatterns;
 
                             if(ofd.ShowDialog() != DialogResult.OK)
                                 return;
 
-                            AddSprite(Sprite.CreateNewSprite(new Bitmap(Image.FromFile(ofd.FileName))), []);
+                            Sprite newSprite = new Sprite
+                            {
+                                data = File.ReadAllBytes(ofd.FileName),
+                                Rectangles = new List<SpriteRectangle>()
+                            };
+                            AddSprite(newSprite, newSprite.Rectangles);
                         }),
                         ]);
                 }
+            }
+        }
+
+        private void DoExportSprite(byte[] data, string fileName)
+        {
+            using (MemoryStream ms = new MemoryStream(data))
+            using (EndianBinaryReader reader = new EndianBinaryReader(ms))
+            {
+                ImageHeaderInfo info = ImageHeaderReader.ReadHeader(reader);
+                ImageFormat format = info.Format.ToString().ToLowerInvariant() switch
+                {
+                    "png" => ImageFormat.Png,
+                    "jpeg" => ImageFormat.Jpeg,
+                    "gif" => ImageFormat.Gif,
+                    "bmp" => ImageFormat.Bmp,
+                    _ => ImageFormat.Bmp
+                };
+                fileName = Path.ChangeExtension(fileName, format.ToString().ToLowerInvariant());
+
+                File.WriteAllBytes(fileName, ms.ToArray());
             }
         }
 
@@ -566,38 +667,25 @@ namespace PAKFile
             g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
 
             g.Clear(pbSpriteImage.BackColor);
+            g.TranslateTransform(x, y);
+            g.ScaleTransform(zoomScale, zoomScale);
 
-            int checkerSize = 10;
-            Color light = Color.LightGray;
-            Color dark = Color.Gray;
+            DrawCheckerBackground(g, bmp.Width, bmp.Height);
 
-            // Only draw checkerboard in the area where the image will be drawn
-            float imgW = bmp.Width * zoomScale;
-            float imgH = bmp.Height * zoomScale;
-            RectangleF imageArea = new RectangleF(x, y, imgW, imgH);
+            g.DrawImage(bmp, 0, 0, bmp.Width, bmp.Height);
 
-            using SolidBrush lightBrush = new SolidBrush(light);
-            using SolidBrush darkBrush = new SolidBrush(dark);
+            DrawRectangles(g, selectedNode);
 
-            // Clip to image area
-            g.SetClip(imageArea);
-
-            // Draw checkerboard
-            for (int cy = 0; cy < imgH; cy += checkerSize)
+            if (statusStrip != null)
             {
-                for (int cx = 0; cx < imgW; cx += checkerSize)
-                {
-                    bool isDark = ((cx / checkerSize) + (cy / checkerSize)) % 2 == 0;
-                    RectangleF tile = new RectangleF(x + cx, y + cy, checkerSize, checkerSize);
-                    g.FillRectangle(isDark ? darkBrush : lightBrush, tile);
-                }
+                scaleLabel!.Text = $"{(zoomScale * 100.0f).ToString("0.00")}%";
+                imageSizeLabel!.Text = $"{bmp.Width}x{bmp.Height}";
+                imageFormatButton!.Text = bmp.PixelFormat.ToString();
             }
+        }
 
-            // Reset clip
-            g.ResetClip();
-
-            g.DrawImage(bmp, x, y, bmp.Width * zoomScale, bmp.Height * zoomScale);
-
+        private void DrawRectangles(Graphics g, TreeNode selectedNode)
+        {
             SpriteRectangle? spriteRectangle = null;
             if (selectedNode.Tag is SpriteRectangle r)
             {
@@ -609,24 +697,50 @@ namespace PAKFile
             if (sprite == null)
                 return;
 
-            foreach (SpriteRectangle rect in sprite.spriteRectangles)
+            foreach (SpriteRectangle rect in sprite.Rectangles)
             {
-                if (rect == spriteRectangle)
+                if (rect.Equals(spriteRectangle))
                     continue;
-                g.DrawRectangle(_unselectedPen, rect.ToRectangleF(x, y, zoomScale));
+
+                RectangleF rectf = new RectangleF(rect.x, rect.y, rect.width, rect.height);
+                g.DrawRectangle(_unselectedPen, rectf);
             }
 
             if (spriteRectangle != null)
             {
-                g.DrawRectangle(_selectionPen, spriteRectangle.ToRectangleF(x, y, zoomScale));
+                RectangleF rectf = new RectangleF(spriteRectangle.x, spriteRectangle.y, spriteRectangle.width, spriteRectangle.height);
+                g.DrawRectangle(_selectionPen, rectf);
+            }
+        }
+
+        private void DrawCheckerBackground(Graphics g, float width, float height)
+        {
+            int checkerSize = 10;
+            Color light = Color.LightGray;
+            Color dark = Color.Gray;
+
+            // Only draw checkerboard in the area where the image will be drawn
+            RectangleF imageArea = new RectangleF(0, 0, width, height);
+
+            using SolidBrush lightBrush = new SolidBrush(light);
+            using SolidBrush darkBrush = new SolidBrush(dark);
+
+            // Clip to image area
+            g.SetClip(imageArea);
+
+            // Draw checkerboard
+            for (int cy = 0; cy < height; cy += checkerSize)
+            {
+                for (int cx = 0; cx < width; cx += checkerSize)
+                {
+                    bool isDark = ((cx / checkerSize) + (cy / checkerSize)) % 2 == 0;
+                    RectangleF tile = new RectangleF(cx, cy, checkerSize, checkerSize);
+                    g.FillRectangle(isDark ? darkBrush : lightBrush, tile);
+                }
             }
 
-            if (statusStrip != null)
-            {
-                scaleLabel!.Text = $"{(zoomScale * 100.0f).ToString("0.00")}%";
-                imageSizeLabel!.Text = $"{sprite.sprite?.Width}x{sprite.sprite?.Height}";
-                imageFormatLabel!.Text = sprite.sprite?.PixelFormat.ToString();
-            }
+            // Reset clip
+            g.ResetClip();
         }
 
         private void SpriteTreeView_AfterSelect(object? sender, TreeViewEventArgs e)
@@ -650,13 +764,19 @@ namespace PAKFile
 
             if (node.Tag is Sprite sprite)
             {
-                pbSpriteImage.Image = sprite.sprite;
+                using (MemoryStream ms = new MemoryStream(sprite.data))
+                {
+                    pbSpriteImage.Image = new Bitmap(ms);
+                }
             }
             else if (node.Tag is SpriteRectangle rect)
             {
-                if (node.Parent!.Tag is Sprite spr && pbSpriteImage.Image != spr.sprite)
+                if (node.Parent!.Tag is Sprite spr)
                 {
-                    pbSpriteImage.Image = spr.sprite;
+                    using (MemoryStream ms = new MemoryStream(spr.data))
+                    {
+                        pbSpriteImage.Image = new Bitmap(ms);
+                    }
                 }
 
                 if(numX == null || numY == null || numWidth == null || numHeight == null || numPivX == null || numPivY == null)
@@ -766,7 +886,7 @@ namespace PAKFile
             LoadSelectedTab(tabPage);
         }
 
-        public void OnMainWindowLoaded()
+        public void OnMainWindowLoaded(string[] args)
         {
             if (_mainWindow == null)
             {
@@ -815,6 +935,17 @@ namespace PAKFile
                     ShortcutKeys = Keys.Control | Keys.Shift | Keys.S
                 },
                 new ToolStripSeparator(),
+                new ToolStripMenuItem("Export All Sprites", null, exportAllSpritesToolStripMenuItem_Click)
+                {
+                    Name = "exportAllSpritesPakFileToolStripMenuItem",
+                    ShortcutKeys = Keys.Control | Keys.E
+                },
+                new ToolStripMenuItem("Import Sprites", null, importSpritesToolStripMenuItem_Click)
+                {
+                    Name = "importSpritesPakFileToolStripMenuItem",
+                    ShortcutKeys = Keys.Control | Keys.I
+                },
+                new ToolStripSeparator(),
                 ]);
 
             for (int i = 0; i < newDropDownItems.Count; i++)
@@ -822,18 +953,171 @@ namespace PAKFile
                 dropDownItems.Insert(i, newDropDownItems[i]);
             }
             _mainWindow.ClosedState.AddRange(["openPakFileToolStripMenuItem", "newPakFileToolStripMenuItem"]);
-            _mainWindow.OpenState.AddRange(["openPakFileToolStripMenuItem", "savePakFileToolStripMenuItem", "saveAsPakFileToolStripMenuItem", "newPakFileToolStripMenuItem"]);
+            _mainWindow.OpenState.AddRange([
+                    "openPakFileToolStripMenuItem", "savePakFileToolStripMenuItem",
+                    "saveAsPakFileToolStripMenuItem", "newPakFileToolStripMenuItem",
+                    "exportAllSpritesPakFileToolStripMenuItem", "importSpritesPakFileToolStripMenuItem"
+                ]);
+
+            if(args.Length > 0)
+            {
+                // If there are arguments, assume the first one is a file path to open
+                string filePath = args[0];
+                if (File.Exists(filePath))
+                {
+                    if (Path.GetExtension(filePath).ToLower() != ".pak")
+                        return;
+
+                    OpenPAKFile(filePath);
+                }
+                else
+                {
+                    PluginHost.Log($"File not found: {filePath}");
+                }
+            }
+        }
+
+        private void importSpritesToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            if (!PrecheckSelectedTab(out string? _, out PAK? pakFile, out TabPage? _))
+                return;
+
+            if (pakFile!.Data!.Sprites.Count > 0)
+            {
+                DialogResult result = MessageBox.Show("This will replace all existing sprites. Do you want to continue?", "Import Sprites", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                if (result != DialogResult.Yes)
+                    return;
+            }
+
+            using OpenFileDialog ofd = new OpenFileDialog
+            {
+                Title = "Select Sprite Files",
+                Multiselect = true,
+                RestoreDirectory = true
+            };
+
+            ofd.Filter = AcceptedImageFilePatterns;
+
+            if (ofd.ShowDialog() != DialogResult.OK)
+                return;
+
+            bool import_rectangles = MessageBox.Show("Do you want to import rectangles as well?\nNote the rectangle file must be of similar name as the sprite itself\njust ending in the \"json\" file extension.", "Import Rectangles", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+
+            pakFile.Data!.Sprites.Clear();
+            spriteTreeView?.Nodes.Clear();
+
+            List<string> errors = new List<string>();
+            foreach (string file in ofd.FileNames)
+            {
+                if (!File.Exists(file))
+                {
+                    errors.Add($"{Path.GetFileName(file)}");
+                    continue;
+                }
+
+                string file_extension = Path.GetExtension(file).ToLowerInvariant();
+                switch(file_extension)
+                {
+                    case ".png":
+                    case ".jpg":
+                    case ".jpeg":
+                    case ".gif":
+                    case ".bmp":
+                        break;
+                    default:
+                        errors.Add($"{Path.GetFileName(file)} is not a supported image format.");
+                        continue;
+                }
+
+                Sprite newSprite = new Sprite
+                {
+                    data = File.ReadAllBytes(file),
+                    Rectangles = new List<SpriteRectangle>()
+                };
+
+                // Check if sprite rectangle exists
+                if (import_rectangles)
+                {
+                    string rectanglesFile = Path.ChangeExtension(file, "json");
+                    rectanglesFile = rectanglesFile.Replace("Sprite_", "SpriteRectangle_");
+                    if (File.Exists(rectanglesFile))
+                    {
+                        try
+                        {
+                            string jsonContent = File.ReadAllText(rectanglesFile);
+                            List<SpriteRectangle>? rectangles = JsonConvert.DeserializeObject<List<SpriteRectangle>>(jsonContent);
+                            if (rectangles != null)
+                            {
+                                newSprite.Rectangles = rectangles!;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            errors.Add($"Failed to load rectangles from {Path.GetFileName(rectanglesFile)}: {ex.Message}");
+                        }
+                    }
+                    else
+                    {
+                        errors.Add($"No rectangle file found for {Path.GetFileName(file)}.");
+                    }
+                }
+
+                AddSprite(newSprite, newSprite.Rectangles, true);
+            }
+
+            if(errors.Count > 0)
+            {
+                string errorMessage = "The following files could not be imported:\n" + string.Join("\n", errors);
+                if(errorMessage.Length > 500)
+                    errorMessage = errorMessage.Substring(0, 500) + "\n...";
+
+                MessageBox.Show(errorMessage, "Import Errors", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        private void exportAllSpritesToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            if (!PrecheckSelectedTab(out string? _, out PAK? pakFile, out TabPage? _))
+                return;
+
+
+            if (pakFile!.Data!.Sprites.Count <= 0)
+                return;
+
+            using FolderBrowserDialog fbd = new FolderBrowserDialog();
+            fbd.Description = "Select a folder to export all sprites";
+            fbd.ShowNewFolderButton = true;
+            if(fbd.ShowDialog() != DialogResult.OK)
+                return;
+
+            string exportPath = fbd.SelectedPath;
+
+            const string export_sprtie_file_name_template = "Sprite_{num}.empty";
+            const string export_spriterectangle_file_name_template = "SpriteRectangle_{num}.json";
+
+            bool export_rectangles = MessageBox.Show("Do you want to export rectangles as well?", "Export Rectangles", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+
+            for (int i = 0; i < pakFile.Data.Sprites.Count; i++)
+            {
+                Sprite sprite = pakFile.Data.Sprites[i];
+                DoExportSprite(sprite.data, Path.Combine(exportPath, export_sprtie_file_name_template.Replace("{num}", Convert.ToString(i))));
+                if(export_rectangles)
+                {
+                    string rectanglesFilePath = Path.Combine(exportPath, export_spriterectangle_file_name_template.Replace("{num}", Convert.ToString(i)));
+                    File.WriteAllText(rectanglesFilePath, JsonConvert.SerializeObject(sprite.Rectangles));
+                }
+            }
         }
 
         public bool OnMainWindowClosing()
         {
             if (_pakFiles.Count == 0)
-                return false;
+                return true;
 
             if(_mainWindow == null)
             {
                 PluginHost.Log("IPluginMainWindow is not available.");
-                return false;
+                return true;
             }
 
             if (_pakFiles.Any(x => _mainWindow.IsTabDirty(x.Key)))
@@ -844,22 +1128,22 @@ namespace PAKFile
                     case DialogResult.Yes:
                         break;
                     case DialogResult.No:
-                        return false;
+                        return true;
                     case DialogResult.Cancel:
-                        return true; // Cancel closing
+                        return false; // Cancel closing
                 }
 
-                foreach (var (tab, pak) in _pakFiles)
+                foreach (var (tab, (path, pak)) in _pakFiles)
                 {
                     if (_mainWindow.IsTabDirty(tab))
                     {
-                        pak.Save(pak.FilePath);
+                        pak!.Data!.Write(path);
                         _mainWindow!.SetTabDirty(tab, false);
                     }
                 }
             }
 
-            return false;
+            return true;
         }
     }
 }

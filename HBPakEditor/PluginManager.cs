@@ -75,13 +75,13 @@ namespace HBPakEdtior
             }
         }
 
-        public void OnMainWindowLoaded()
+        public void OnMainWindowLoaded(string[] args)
         {
             foreach (var plugin in _plugins)
             {
                 if (plugin is IPluginMainWindowLoaded mainWindowLoadedPlugin)
                 {
-                    mainWindowLoadedPlugin.OnMainWindowLoaded();
+                    mainWindowLoadedPlugin.OnMainWindowLoaded(args);
                 }
             }
         }
@@ -116,11 +116,11 @@ namespace HBPakEdtior
                 {
                     if (!closingPlugin.OnMainWindowClosing())
                     {
-                        return false; // If any plugin cancels the closing, return false
+                        return true; // If any plugin cancels the closing, return false
                     }
                 }
             }
-            return true; // All plugins allowed the closing
+            return false; // All plugins allowed the closing
         }
     }
 }

@@ -25,6 +25,14 @@ namespace PAKFile
             return data;
         }
 
+        public byte[] PeekBytes(int count, Endianness endianness = Endianness.LittleEndian)
+        {
+            long currentPosition = _reader.BaseStream.Position;
+            byte[] data = ReadBytes(count, endianness);
+            _reader.BaseStream.Seek(currentPosition, SeekOrigin.Begin);
+            return data;
+        }
+
         public string ReadString(int length = -1)
         {
             if (length < 0)

@@ -8,7 +8,7 @@ namespace PluginContracts
 {
     public interface IPluginMainWindowLoaded
     {
-        public void OnMainWindowLoaded();
+        public void OnMainWindowLoaded(string[] args);
     }
 
     public interface IPluginMainWindowClosing

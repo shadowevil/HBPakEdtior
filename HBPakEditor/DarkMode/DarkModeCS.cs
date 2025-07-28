@@ -10,6 +10,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Diagnostics;
 using System.Xml.Linq;
+using System.Reflection.Metadata;
 
 
 namespace DarkModeForms
@@ -331,6 +332,8 @@ namespace DarkModeForms
 		/// <param name="_RoundedPanels">[OPTIONAL] make all Panels Borders Rounded</param>
 		public DarkModeCS(Form _Form, bool _ColorizeIcons = true, bool _RoundedPanels = false)
 		{
+			if (_Form == null)
+				return;
 
 			//Sets the Properties:
 			OwnerForm = _Form;
@@ -345,7 +348,7 @@ namespace DarkModeForms
 					HandleRef handleRef = new HandleRef(_Form, _Form.Handle);
 					newWndProcDelegate = CustomWndProc;
 					originalWndProc = SetWindowLongPtr(handleRef, GWLP_WNDPROC, Marshal.GetFunctionPointerForDelegate(newWndProcDelegate));
-				};
+                };
 			}
 			// This Fires after the normal 'Form_Load' event
 			_Form.Load += (sender, e) =>
@@ -395,6 +398,9 @@ namespace DarkModeForms
 		/// <param name="pIsDarkMode">'true': apply Dark Mode, 'false': apply Clear Mode</param>
 		public void ApplyTheme(bool pIsDarkMode = true)
 		{
+			if (OwnerForm == null)
+				return;
+
 			try
 			{
 				// IsDarkMode member changes only if the User manually changed it here:
@@ -611,7 +617,7 @@ namespace DarkModeForms
 				control.GetType().GetProperty("ForeColor")?.SetValue(control, OScolors.TextInactive);
 				control.GetType().GetProperty("BorderStyle")?.SetValue(control, BorderStyle.None);
 			}
-			if (control is TabControl)
+			if (control is TabControl && control is not FlatTabControl)
 			{
 				var tab = control as TabControl;
 				tab.Appearance = TabAppearance.Normal;

@@ -2,7 +2,9 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Runtime.Serialization.Formatters.Binary;
+using System.Windows.Forms;
 using System.Windows.Forms.VisualStyles;
 using DarkModeForms;
 using PluginContracts.HostInterfaces;
@@ -29,8 +31,11 @@ namespace HBPakEdtior
         private readonly TabPage _tabTemplate;
         private readonly TabPage _emptyTab;
 
-        public MainWindow()
+        private readonly string[] startupArgs;
+
+        public MainWindow(string[] args)
         {
+            startupArgs = args;
             // Theme Setup
             _darkMode = new DarkModeCS(this, true, false)
             {
@@ -74,9 +79,11 @@ namespace HBPakEdtior
         protected override void OnLoad(EventArgs e)
         {
             base.OnLoad(e);
-            _pluginManager.OnMainWindowLoaded();
+            _pluginManager.OnMainWindowLoaded(startupArgs);
 
-            SetMenuState(_closedState.ToArray());
+            if (startupArgs.Length <= 0)
+                SetMenuState(_closedState.ToArray());
+
             SetWindowName();
         }
 

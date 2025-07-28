@@ -9,8 +9,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PAKFile", "PAKFile\PAKFile.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PluginContracts", "PluginContracts\PluginContracts.csproj", "{2C533352-16A7-4BC6-8EFB-A5F4733FDF8B}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestPlugin", "TestPlugin\TestPlugin.csproj", "{A7605830-298D-46A4-ADDB-1B809BA00C99}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ControlExtensions", "ControlExtensions\ControlExtensions.csproj", "{A1339B9A-99DA-4512-9A27-2DB0F37FBE5D}"
 EndProject
 Global
@@ -31,10 +29,6 @@ Global
 		{2C533352-16A7-4BC6-8EFB-A5F4733FDF8B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2C533352-16A7-4BC6-8EFB-A5F4733FDF8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2C533352-16A7-4BC6-8EFB-A5F4733FDF8B}.Release|Any CPU.Build.0 = Release|Any CPU
-		{A7605830-298D-46A4-ADDB-1B809BA00C99}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{A7605830-298D-46A4-ADDB-1B809BA00C99}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{A7605830-298D-46A4-ADDB-1B809BA00C99}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{A7605830-298D-46A4-ADDB-1B809BA00C99}.Release|Any CPU.Build.0 = Release|Any CPU
 		{A1339B9A-99DA-4512-9A27-2DB0F37FBE5D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A1339B9A-99DA-4512-9A27-2DB0F37FBE5D}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A1339B9A-99DA-4512-9A27-2DB0F37FBE5D}.Release|Any CPU.ActiveCfg = Release|Any CPU

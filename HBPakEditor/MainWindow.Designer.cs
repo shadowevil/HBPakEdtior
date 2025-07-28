@@ -30,6 +30,7 @@ namespace HBPakEdtior
         /// </summary>
         private void InitializeComponent()
         {
+            System.ComponentModel.ComponentResourceManager resources = new System.ComponentModel.ComponentResourceManager(typeof(MainWindow));
             menuStrip1 = new MenuStrip();
             fileToolStripMenuItem = new ToolStripMenuItem();
             closeToolStripMenuItem = new ToolStripMenuItem();
@@ -76,7 +77,7 @@ namespace HBPakEdtior
             // closeToolStripMenuItem
             // 
             closeToolStripMenuItem.Name = "closeToolStripMenuItem";
-            closeToolStripMenuItem.Size = new Size(224, 26);
+            closeToolStripMenuItem.Size = new Size(128, 26);
             closeToolStripMenuItem.Text = "Close";
             closeToolStripMenuItem.Click += closeToolStripMenuItem_Click;
             // 
@@ -92,6 +93,7 @@ namespace HBPakEdtior
             // tabControl1
             // 
             tabControl1.AfterRename = null;
+            tabControl1.Appearance = TabAppearance.FlatButtons;
             tabControl1.BeforeRename = null;
             tabControl1.Controls.Add(tabTemplate);
             tabControl1.Dock = DockStyle.Fill;
@@ -105,10 +107,10 @@ namespace HBPakEdtior
             // tabTemplate
             // 
             tabTemplate.Controls.Add(splitContainer1);
-            tabTemplate.Location = new Point(4, 29);
+            tabTemplate.Location = new Point(4, 32);
             tabTemplate.Name = "tabTemplate";
             tabTemplate.Padding = new Padding(3);
-            tabTemplate.Size = new Size(832, 382);
+            tabTemplate.Size = new Size(832, 379);
             tabTemplate.TabIndex = 0;
             tabTemplate.Text = "tabTemplate";
             tabTemplate.UseVisualStyleBackColor = true;
@@ -127,7 +129,7 @@ namespace HBPakEdtior
             // splitContainer1.Panel2
             // 
             splitContainer1.Panel2.Controls.Add(splitContainer2);
-            splitContainer1.Size = new Size(826, 376);
+            splitContainer1.Size = new Size(826, 373);
             splitContainer1.SplitterDistance = 280;
             splitContainer1.TabIndex = 1;
             // 
@@ -137,7 +139,7 @@ namespace HBPakEdtior
             spriteTreeView.Dock = DockStyle.Fill;
             spriteTreeView.Location = new Point(0, 0);
             spriteTreeView.Name = "spriteTreeView";
-            spriteTreeView.Size = new Size(280, 376);
+            spriteTreeView.Size = new Size(280, 373);
             spriteTreeView.TabIndex = 0;
             // 
             // splitContainer2
@@ -153,8 +155,8 @@ namespace HBPakEdtior
             splitContainer2.Panel1.Controls.Add(pbSpriteImage);
             splitContainer2.Panel1.Controls.Add(pbImageControlBar);
             splitContainer2.Panel2MinSize = 128;
-            splitContainer2.Size = new Size(542, 376);
-            splitContainer2.SplitterDistance = 244;
+            splitContainer2.Size = new Size(542, 373);
+            splitContainer2.SplitterDistance = 241;
             splitContainer2.TabIndex = 0;
             // 
             // pbSpriteImage
@@ -164,7 +166,7 @@ namespace HBPakEdtior
             pbSpriteImage.Location = new Point(0, 28);
             pbSpriteImage.Name = "pbSpriteImage";
             pbSpriteImage.Padding = new Padding(5);
-            pbSpriteImage.Size = new Size(540, 214);
+            pbSpriteImage.Size = new Size(540, 211);
             pbSpriteImage.TabIndex = 0;
             pbSpriteImage.TabStop = false;
             // 
@@ -193,6 +195,7 @@ namespace HBPakEdtior
             Controls.Add(tabControl1);
             Controls.Add(menuStrip1);
             DoubleBuffered = true;
+            Icon = (Icon)resources.GetObject("$this.Icon");
             MainMenuStrip = menuStrip1;
             MinimumSize = new Size(868, 500);
             Name = "MainWindow";

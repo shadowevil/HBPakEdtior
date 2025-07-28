@@ -30,27 +30,38 @@ namespace PAKFile
 
         public static BmpHeader ReadFromStream(EndianBinaryReader reader)
         {
-            reader.Skip(4);
-            return new BmpHeader
+            var savedPosition = reader.Position;
+            var bmpHeader = new BmpHeader
             {
-                BfType = reader.ReadUInt16(),
-                BfSize = reader.ReadUInt32(),
-                BfReserved1 = reader.ReadUInt16(),
-                BfReserved2 = reader.ReadUInt16(),
-                BfOffBits = reader.ReadUInt32(),
-
-                BiSize = reader.ReadUInt32(),
-                BiWidth = reader.ReadInt32(),
-                BiHeight = reader.ReadInt32(),
-                BiPlanes = reader.ReadUInt16(),
-                BiBitCount = reader.ReadUInt16(),
-                BiCompression = reader.ReadUInt32(),
-                BiSizeImage = reader.ReadUInt32(),
-                BiXPelsPerMeter = reader.ReadInt32(),
-                BiYPelsPerMeter = reader.ReadInt32(),
-                BiClrUsed = reader.ReadUInt32(),
-                BiClrImportant = reader.ReadUInt32()
+                BfType = reader.ReadUInt16()
             };
+            if (bmpHeader.BfType != 0x4D42) // 'BM' in ASCII
+            {
+                throw new InvalidDataException("Invalid BMP file header.");
+            }
+
+            bmpHeader.BfSize            = reader.ReadUInt32();
+            bmpHeader.BfReserved1       = reader.ReadUInt16();
+            bmpHeader.BfReserved2       = reader.ReadUInt16();
+            bmpHeader.BfOffBits         = reader.ReadUInt32();
+            bmpHeader.BiSize            = reader.ReadUInt32();
+            bmpHeader.BiWidth           = reader.ReadInt32();
+            bmpHeader.BiHeight          = reader.ReadInt32();
+            bmpHeader.BiPlanes          = reader.ReadUInt16();
+            bmpHeader.BiBitCount        = reader.ReadUInt16();
+            bmpHeader.BiCompression     = reader.ReadUInt32();
+            bmpHeader.BiSizeImage       = reader.ReadUInt32();
+            bmpHeader.BiXPelsPerMeter   = reader.ReadInt32();
+            bmpHeader.BiYPelsPerMeter   = reader.ReadInt32();
+            bmpHeader.BiClrUsed         = reader.ReadUInt32();
+            bmpHeader.BiClrImportant    = reader.ReadUInt32();
+
+            if (bmpHeader.BiWidth <= 0 || bmpHeader.BiHeight == 0)
+            {
+                throw new InvalidDataException("Invalid BMP dimensions. Width and height must be positive.");
+            }
+            reader.Seek(savedPosition, SeekOrigin.Begin);
+            return bmpHeader;
         }
     }
 }
