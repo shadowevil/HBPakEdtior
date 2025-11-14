@@ -20,6 +20,12 @@ namespace HBPakEditor
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 
+        [DllImport("user32.dll")]
+        private static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
         [StructLayout(LayoutKind.Sequential)]
         private struct COPYDATASTRUCT
         {
@@ -37,12 +43,20 @@ namespace HBPakEditor
 
             if (args.Length > 0)
             {
-                IntPtr existingWindow = FindFirstWindow();
-                if (existingWindow != IntPtr.Zero)
+                List<IntPtr> existingWindows = FindAllWindows();
+                bool sent = false;
+
+                foreach (IntPtr hwnd in existingWindows)
                 {
-                    SendFilesToWindow(existingWindow, args);
-                    return;
+                    if (SendFilesToWindow(hwnd, args))
+                    {
+                        sent = true;
+                        break;
+                    }
                 }
+
+                if (sent)
+                    return;
             }
 
             MainWindow window = new MainWindow();
@@ -53,13 +67,20 @@ namespace HBPakEditor
             Application.Run(window);
         }
 
-        private static IntPtr FindFirstWindow()
+        private static List<IntPtr> FindAllWindows()
         {
-            IntPtr foundWindow = IntPtr.Zero;
+            List<IntPtr> foundWindows = new List<IntPtr>();
             string targetClass = "WindowsForms10.Window";
+            const uint GW_OWNER = 4;
 
             EnumWindows((hWnd, lParam) =>
             {
+                if (!IsWindowVisible(hWnd))
+                    return true;
+
+                if (GetWindow(hWnd, GW_OWNER) != IntPtr.Zero)
+                    return true;
+
                 StringBuilder className = new StringBuilder(256);
                 GetClassName(hWnd, className, className.Capacity);
 
@@ -68,32 +89,39 @@ namespace HBPakEditor
                     GetWindowThreadProcessId(hWnd, out uint processId);
                     if (Process.GetProcessById((int)processId).ProcessName == Process.GetCurrentProcess().ProcessName)
                     {
-                        foundWindow = hWnd;
-                        return false;
+                        foundWindows.Add(hWnd);
                     }
                 }
                 return true;
             }, IntPtr.Zero);
 
-            return foundWindow;
+            return foundWindows;
         }
 
-        private static void SendFilesToWindow(IntPtr hwnd, string[] files)
+        private static bool SendFilesToWindow(IntPtr hwnd, string[] files)
         {
-            string data = string.Join("|", files);
-            byte[] bytes = Encoding.UTF8.GetBytes(data);
-            IntPtr ptr = Marshal.AllocHGlobal(bytes.Length);
-            Marshal.Copy(bytes, 0, ptr, bytes.Length);
-
-            COPYDATASTRUCT cds = new COPYDATASTRUCT
+            try
             {
-                dwData = IntPtr.Zero,
-                cbData = bytes.Length,
-                lpData = ptr
-            };
+                string data = string.Join("|", files);
+                byte[] bytes = Encoding.UTF8.GetBytes(data);
+                IntPtr ptr = Marshal.AllocHGlobal(bytes.Length);
+                Marshal.Copy(bytes, 0, ptr, bytes.Length);
 
-            SendMessage(hwnd, WM_COPYDATA, IntPtr.Zero, ref cds);
-            Marshal.FreeHGlobal(ptr);
+                COPYDATASTRUCT cds = new COPYDATASTRUCT
+                {
+                    dwData = IntPtr.Zero,
+                    cbData = bytes.Length,
+                    lpData = ptr
+                };
+
+                SendMessage(hwnd, WM_COPYDATA, IntPtr.Zero, ref cds);
+                Marshal.FreeHGlobal(ptr);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         public static void ProcessArgs(MainWindow window, string[] args)
