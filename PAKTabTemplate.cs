@@ -1,0 +1,998 @@
+﻿using Newtonsoft.Json;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace HBPakEditor
+{
+    public class PAKTabTemplate : PAKTabPage
+    {
+        MainWindow mainWindow = null!;
+
+        // Left Panel
+        private SplitContainer _mainSplitContainer;
+        private TreeView _itemTreeView;
+
+        // Right Top Panel
+        private Panel _topPanel;
+        private MenuStrip _topMenuStrip;
+        private ToolStripMenuItem _zoomMenuItem;
+        private StatusStrip _topStatusStrip;
+        private ToolStripStatusLabel _zoomStatusLabel;
+        private ToolStripStatusLabel _dimensionsStatusLabel;
+        private ToolStripStatusLabel _rectangleDimensionsStatusLabel;
+        private ToolStripStatusLabel _imageInfoStatusLabel;
+
+        // Right Bottom Panel
+        private SplitContainer _rightSplitContainer;
+        private Panel _bottomPanel;
+        private TableLayoutPanel _propertiesTableLayout;
+
+        // Property inputs
+        private Label _xLabel;
+        private NumericTextBox<Int16> _xTextBox;
+        private Label _yLabel;
+        private NumericTextBox<Int16> _yTextBox;
+        private Label _widthLabel;
+        private NumericTextBox<Int16> _widthTextBox;
+        private Label _heightLabel;
+        private NumericTextBox<Int16> _heightTextBox;
+        private Label _pivotXLabel;
+        private NumericTextBox<Int16> _pivotXTextBox;
+        private Label _pivotYLabel;
+        private NumericTextBox<Int16> _pivotYTextBox;
+
+        // Selection tracking
+        private SpriteReference? _selectedItem;
+
+        // Properties
+        public Int16 X
+        {
+            get => _xTextBox.GetValue();
+            set => _xTextBox.SetValue(value);
+        }
+
+        public Int16 Y
+        {
+            get => _yTextBox.GetValue();
+            set => _yTextBox.SetValue(value);
+        }
+
+        public Int16 Width
+        {
+            get => _widthTextBox.GetValue();
+            set => _widthTextBox.SetValue(value);
+        }
+
+        public Int16 Height
+        {
+            get => _heightTextBox.GetValue();
+            set => _heightTextBox.SetValue(value);
+        }
+
+        public Int16 OffsetX
+        {
+            get => _pivotXTextBox.GetValue();
+            set => _pivotXTextBox.SetValue(value);
+        }
+
+        public Int16 OffsetY
+        {
+            get => _pivotYTextBox.GetValue();
+            set => _pivotYTextBox.SetValue(value);
+        }
+
+        public SpriteReference? SelectedItem
+        {
+            get => _selectedItem;
+            private set => _selectedItem = value;
+        }
+
+        public PAKTabTemplate(MainWindow mainWindow)
+        {
+            Text = "Template";
+            InitializeComponents();
+            MainWindow.EnableDoubleBuffering(this);
+            this.mainWindow = mainWindow;
+        }
+
+        private void InitializeComponents()
+        {
+            SuspendLayout();
+
+            // Main split container (left tree | right content)
+            _mainSplitContainer = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                SplitterDistance = 150 // Start at minimum
+            };
+            _mainSplitContainer.Panel1MinSize = 150;
+            _mainSplitContainer.Panel2MinSize = 100;
+            _mainSplitContainer.SplitterMoved += OnMainSplitterMoved;
+
+            // Left panel - TreeView
+            _itemTreeView = new TreeView
+            {
+                Dock = DockStyle.Fill
+            };
+            _itemTreeView.AfterSelect += OnTreeViewItemSelected;
+            //_itemTreeView.NodeMouseClick += OnTreeViewNodeMouseClick;
+            _itemTreeView.MouseUp += OnTreeViewMouseClick;
+            _mainSplitContainer.Panel1.Controls.Add(_itemTreeView);
+
+            // Right split container (top viewport | bottom properties)
+            _rightSplitContainer = new SplitContainer
+            {
+                Dock = DockStyle.Fill,
+                Orientation = Orientation.Horizontal,
+                FixedPanel = FixedPanel.Panel2
+            };
+
+            _rightSplitContainer.Panel1MinSize = 200;
+            _rightSplitContainer.Panel2MinSize = 100;
+            _rightSplitContainer.SplitterMoved += OnRightSplitterMoved;
+
+            // Top panel with MenuStrip and StatusStrip
+            _topPanel = new Panel
+            {
+                Dock = DockStyle.Fill
+            };
+
+            _topPanel.Paint += MainSpriteView_OnPaint;
+
+            _topMenuStrip = new MenuStrip
+            {
+                ForeColor = Color.White,
+                Dock = DockStyle.Top
+            };
+
+            _zoomMenuItem = new ToolStripMenuItem("Zoom");
+            _zoomMenuItem.CheckOnClick = true;
+            _zoomMenuItem.CheckedChanged += (s, e) => {
+                _zoomMenuItem.BackColor = _zoomMenuItem.Checked ? Color.FromArgb(0, 122, 204) : Color.FromArgb(45, 45, 48);
+                _topPanel.Invalidate();
+            };
+            _topMenuStrip.Items.Add(_zoomMenuItem);
+
+            _topStatusStrip = new StatusStrip
+            {
+                ForeColor = Color.White,
+                Dock = DockStyle.Bottom,
+                SizingGrip = false
+            };
+
+            _zoomStatusLabel = new ToolStripStatusLabel("100%");
+            _dimensionsStatusLabel = new ToolStripStatusLabel("0x0");
+            _rectangleDimensionsStatusLabel = new ToolStripStatusLabel("0x0");
+            _imageInfoStatusLabel = new ToolStripStatusLabel("Unknown");
+
+            _topStatusStrip.Items.Add(_zoomStatusLabel);
+            _topStatusStrip.Items.Add(new ToolStripStatusLabel("|"));
+            _topStatusStrip.Items.Add(_dimensionsStatusLabel);
+            _topStatusStrip.Items.Add(new ToolStripStatusLabel("|"));
+            _topStatusStrip.Items.Add(_imageInfoStatusLabel);
+            _topStatusStrip.Items.Add(new ToolStripStatusLabel("|"));
+            _topStatusStrip.Items.Add(_rectangleDimensionsStatusLabel);
+
+            _topPanel.Controls.Add(_topStatusStrip);
+            _topPanel.Controls.Add(_topMenuStrip);
+
+            _rightSplitContainer.Panel1.Controls.Add(_topPanel);
+
+            // Bottom panel - Properties
+            _bottomPanel = new Panel
+            {
+                Dock = DockStyle.Fill,
+                Padding = new Padding(10)
+            };
+
+            // Create labels and textboxes
+            _xLabel = CreateLabel("X:");
+            _xTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 0 };
+            _xTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _yLabel = CreateLabel("Y:");
+            _yTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 1 };
+            _yTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _widthLabel = CreateLabel("Width:");
+            _widthTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 2 };
+            _widthTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _heightLabel = CreateLabel("Height:");
+            _heightTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 3 };
+            _heightTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _pivotXLabel = CreateLabel("Pivot X:");
+            _pivotXTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 4 };
+            _pivotXTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _pivotYLabel = CreateLabel("Pivot Y:");
+            _pivotYTextBox = new NumericTextBox<Int16> { AllowNegative = true, TabIndex = 5 };
+            _pivotYTextBox.LostFocus += OnNumeric_FocusLost;
+
+            _bottomPanel.Controls.Add(_xLabel);
+            _bottomPanel.Controls.Add(_xTextBox);
+            _bottomPanel.Controls.Add(_yLabel);
+            _bottomPanel.Controls.Add(_yTextBox);
+            _bottomPanel.Controls.Add(_widthLabel);
+            _bottomPanel.Controls.Add(_widthTextBox);
+            _bottomPanel.Controls.Add(_heightLabel);
+            _bottomPanel.Controls.Add(_heightTextBox);
+            _bottomPanel.Controls.Add(_pivotXLabel);
+            _bottomPanel.Controls.Add(_pivotXTextBox);
+            _bottomPanel.Controls.Add(_pivotYLabel);
+            _bottomPanel.Controls.Add(_pivotYTextBox);
+
+            _bottomPanel.Resize += OnBottomPanelResize;
+            OnBottomPanelResize(_bottomPanel, EventArgs.Empty);
+
+            _rightSplitContainer.Panel2.Controls.Add(_bottomPanel);
+
+            // Assemble hierarchy
+            _mainSplitContainer.Panel2.Controls.Add(_rightSplitContainer);
+            Controls.Add(_mainSplitContainer);
+
+            ResumeLayout(false);
+            PerformLayout();
+        }
+
+        private void OnTreeViewMouseClick(object? sender, MouseEventArgs e)
+        {
+            if (this is PAKTabEmpty)
+                return;
+
+            if (e.Button == MouseButtons.Right)
+            {
+                var node = _itemTreeView.HitTest(e.Location).Node;
+                if (node != null)
+                {
+                    OnTreeViewNodeMouseClick(sender, new TreeNodeMouseClickEventArgs(node, e.Button, e.Clicks, e.X, e.Y));
+                    return;
+                }
+
+                ContextMenuStrip menu = CreateContextMenuForNode(null);
+                menu.Show(_itemTreeView, e.Location);
+            }
+        }
+
+        private void OnTreeViewNodeMouseClick(object? sender, TreeNodeMouseClickEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                _itemTreeView.SelectedNode = e.Node;
+
+                if (e.Node?.Tag is SpriteReference reference)
+                {
+                    ContextMenuStrip menu = CreateContextMenuForNode(reference);
+                    menu.Show(_itemTreeView, e.Location);
+                }
+            }
+        }
+
+        private ContextMenuStrip CreateContextMenuForNode(SpriteReference? reference)
+        {
+            ContextMenuStrip menu = new ContextMenuStrip();
+
+            if (reference != null)
+            {
+                if (reference.Value.RectangleIndex == -1)
+                {
+                    // Sprite node
+                    menu.Items.Add("Add Rectangle", null, (s, e) => OnAddRectangle(reference.Value));
+                    menu.Items.Add(new ToolStripSeparator());
+                    menu.Items.Add("Import Sprite", null, (s, e) => OnImportSprite(reference.Value));
+                    menu.Items.Add("Export Sprite", null, (s, e) => OnExportSprite(reference.Value));
+                    menu.Items.Add("Export Rectangles", null, (s, e) => OnExportRectangles(reference.Value));
+                    menu.Items.Add(new ToolStripSeparator());
+                    menu.Items.Add("Delete Sprite", null, (s, e) => OnDeleteSprite(reference.Value));
+                }
+                else
+                {
+                    // Rectangle node menu
+                    menu.Items.Add("Delete Rectangle", null, (s, e) => OnDeleteRectangle(reference.Value));
+                }
+            } else
+            {
+                menu.Items.Add("Add New Sprite", null, (s, e) => OnAddNewSprite());
+            }
+            return menu;
+        }
+
+        private void OnAddNewSprite()
+        {
+            if (this is PAKTabEmpty)
+                return;
+
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.Filter = "Image Files|*.png;*.bmp|All Files|*.*";
+                openFileDialog.Title = "Import New Sprite";
+                if(openFileDialog.ShowDialog() == DialogResult.OK)
+                {
+                    byte[] imageData = File.ReadAllBytes(openFileDialog.FileName);
+                    PAKLib.Sprite newSprite = new PAKLib.Sprite
+                    {
+                        data = imageData,
+                        Rectangles = new List<PAKLib.SpriteRectangle>()
+                    };
+                    OpenPAK?.Data?.Sprites.Add(newSprite);
+                    PopulateTreeItems();
+                    MarkTabDirty();
+                }
+            }
+        }
+
+        private void OnExportRectangles(SpriteReference reference)
+        {
+            if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
+            {
+                var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                if (sprite != null)
+                {
+                    using(SaveFileDialog sfd = new SaveFileDialog())
+                    {
+                        sfd.Filter = "JSON File|*.json|All Files|*.*";
+                        sfd.Title = "Export Sprite Rectangles";
+                        sfd.FileName = $"sprite_{reference.SpriteIndex}_rectangles.json";
+                        if(sfd.ShowDialog() == DialogResult.OK)
+                        {
+                            string json = JsonConvert.SerializeObject(sprite.Rectangles, Formatting.Indented);
+                            File.WriteAllText(sfd.FileName, json);
+                        }
+                    }
+                }
+            }
+        }
+
+        private RenamableTabControl<PAKTabPage>? GetParentTabControl()
+        {
+            if (this.Parent is RenamableTabControl<PAKTabPage> tabControl)
+                return tabControl;
+            return null;
+        }
+
+        private void MarkTabDirty()
+        {
+            GetParentTabControl()?.SetTabDirty(this, true);
+        }
+
+        private void OnImportSprite(SpriteReference reference)
+        {
+            if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
+            {
+                using(OpenFileDialog ofd = new OpenFileDialog())
+                {
+                    ofd.Filter = "Image Files|*.png;*.bmp;*.jpg;*.jpeg;*.gif|All Files|*.*";
+                    ofd.Title = "Import Sprite Image";
+                    if(ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        byte[] imageData = File.ReadAllBytes(ofd.FileName);
+                        OpenPAK.Data.Sprites[reference.SpriteIndex].data = imageData;
+                        // Refresh current view if this sprite is selected
+                        if(_selectedItem != null && _selectedItem.Value.SpriteIndex == reference.SpriteIndex)
+                        {
+                            using(MemoryStream ms = new MemoryStream(imageData))
+                            {
+                                _currentBmp = new Bitmap(ms);
+                            }
+                            _topPanel.Invalidate();
+                            MarkTabDirty();
+                        }
+                    }
+                }
+            }
+        }
+
+        private void OnExportSprite(SpriteReference reference)
+        {
+            if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
+            {
+                var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                if (sprite != null)
+                {
+                    using(SaveFileDialog sfd = new SaveFileDialog())
+                    {
+                        sfd.Filter = "PNG Image|*.png|Bitmap Image|*.bmp";
+                        sfd.Title = "Export Sprite Image";
+                        sfd.FileName = $"sprite_{reference.SpriteIndex}.png";
+                        if(sfd.ShowDialog() == DialogResult.OK)
+                        {
+                            File.WriteAllBytes(sfd.FileName, sprite.data);
+                        }
+                    }
+                }
+            }
+        }
+
+        private void OnAddRectangle(SpriteReference reference)
+        {
+            OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.Add(new PAKLib.SpriteRectangle
+            {
+                x = 0,
+                y = 0,
+                width = 0,
+                height = 0,
+                pivotX = 0,
+                pivotY = 0
+            });
+            PopulateTreeItems();
+            _itemTreeView.SelectedNode = _itemTreeView.Nodes[reference.SpriteIndex].LastNode;
+            MarkTabDirty();
+        }
+
+        private void OnDeleteSprite(SpriteReference reference)
+        {
+            OpenPAK?.Data?.Sprites.RemoveAt(reference.SpriteIndex);
+            PopulateTreeItems();
+            _itemTreeView.SelectedNode = null;
+            _currentBmp = null;
+            _topPanel.Invalidate();
+            MarkTabDirty();
+        }
+
+        private void OnDeleteRectangle(SpriteReference reference)
+        {
+            OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.RemoveAt(reference.RectangleIndex);
+            PopulateTreeItems();
+            _itemTreeView.Nodes[reference.SpriteIndex].Expand();
+            _currentRectangle = Rectangle.Empty;
+            MarkTabDirty();
+        }
+
+        private void OnNumeric_FocusLost(object? sender, EventArgs e)
+        {
+            if (_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
+            {
+                var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
+                if (sprite != null && _selectedItem.Value.RectangleIndex != -1)
+                {
+                    var rect = sprite.Rectangles[_selectedItem.Value.RectangleIndex];
+                    rect.x = X;
+                    rect.y = Y;
+                    rect.width = Width;
+                    rect.height = Height;
+                    rect.pivotX = OffsetX;
+                    rect.pivotY = OffsetY;
+                    sprite.Rectangles[_selectedItem.Value.RectangleIndex] = rect;
+                    // Update current rectangle
+                    _currentRectangle = new Rectangle(rect.x, rect.y, rect.width, rect.height);
+                    _topPanel.Invalidate();
+                    MarkTabDirty();
+                }
+            }
+        }
+
+        private Bitmap? _currentBmp = null;
+        private List<Rectangle> _rectangles = new List<Rectangle>();
+        private Rectangle _currentRectangle = Rectangle.Empty;
+        private void MainSpriteView_OnPaint(object? sender, PaintEventArgs e)
+        {
+            if (_currentBmp == null)
+                return;
+            e.Graphics.Clear(_topPanel.BackColor);
+            e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+            e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
+            e.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit;
+
+            // Center the image
+            int x = (_topPanel.ClientSize.Width - _currentBmp.Width) / 2;
+            int y = (_topPanel.ClientSize.Height - _currentBmp.Height) / 2;
+            int width = _currentBmp.Width;
+            int height = _currentBmp.Height;
+            bool zoomed = _zoomMenuItem.Checked;
+            float scaleFactor = 1.0f;
+            if (zoomed)
+            {
+                // Zoom to fit
+                float scaleX = (float)_topPanel.ClientSize.Width / _currentBmp.Width;
+                float scaleY = (float)_topPanel.ClientSize.Height / _currentBmp.Height;
+                scaleFactor = Math.Min(scaleX, scaleY) * 0.75f;
+                width = (int)(_currentBmp.Width * scaleFactor);
+                height = (int)(_currentBmp.Height * scaleFactor);
+                // Recalculate position
+                x = (_topPanel.ClientSize.Width - width) / 2;
+                y = (_topPanel.ClientSize.Height - height) / 2;
+
+                _zoomStatusLabel.Text = $"{(int)(scaleFactor * 100)}%";
+            }
+            e.Graphics.DrawImage(_currentBmp, x, y, width, height);
+
+            // Draw rectangles
+            if (_rectangles.Count > 0)
+            {
+                e.Graphics.DrawRectangles(Pens.Red, _rectangles.Select(r =>
+                    new Rectangle(
+                        (int)(r.X * scaleFactor) + x,
+                        (int)(r.Y * scaleFactor) + y,
+                        (int)(r.Width * scaleFactor),
+                        (int)(r.Height * scaleFactor)
+                    )).ToArray()
+                );
+            }
+
+            if (_currentRectangle != Rectangle.Empty)
+            {
+                e.Graphics.DrawRectangle(Pens.Lime, new Rectangle(
+                    (int)(_currentRectangle.X * scaleFactor) + x,
+                    (int)(_currentRectangle.Y * scaleFactor) + y,
+                    (int)(_currentRectangle.Width * scaleFactor),
+                    (int)(_currentRectangle.Height * scaleFactor)
+                ));
+            }
+        }
+
+        private void OnMainSplitterMoved(object? sender, SplitterEventArgs e)
+        {
+            int maxDistance = Math.Min(400, _mainSplitContainer.Width - _mainSplitContainer.Panel2MinSize);
+            if (_mainSplitContainer.SplitterDistance > maxDistance)
+            {
+                _mainSplitContainer.SplitterDistance = maxDistance;
+            }
+        }
+
+        private void OnRightSplitterMoved(object? sender, SplitterEventArgs e)
+        {
+            int minDistance = Math.Max(0, _rightSplitContainer.Height - 200);
+            if (_rightSplitContainer.Panel2.Height > 200 && _rightSplitContainer.SplitterDistance < minDistance)
+            {
+                _rightSplitContainer.SplitterDistance = minDistance;
+            }
+        }
+
+        private void OnBottomPanelResize(object? sender, EventArgs e)
+        {
+            int panelWidth = _bottomPanel.ClientSize.Width - 20; // Account for padding
+            int panelHeight = _bottomPanel.ClientSize.Height - 20;
+
+            int labelWidth = 60;
+            int textBoxWidth = 100;
+            int pairWidth = labelWidth + textBoxWidth; // Total width of label + textbox
+            int spacing = 60; // Spacing between pairs
+
+            int totalWidth = (pairWidth * 3) + (spacing * 2); // 3 pairs + 2 spacings
+            int startX = (panelWidth - totalWidth) / 2; // Center horizontally
+
+            int controlHeight = 20;
+            int rowSpacing = 20; // Spacing between rows
+            int totalHeight = (controlHeight * 2) + rowSpacing; // 2 rows + spacing
+            int startY = (panelHeight - totalHeight) / 2; // Center vertically
+
+            int row2Y = startY + controlHeight + rowSpacing;
+
+            // Row 0 - X, Width, Pivot X
+            _xLabel.SetBounds(startX, startY, labelWidth, controlHeight);
+            _xTextBox.SetBounds(_xLabel.Right, startY, textBoxWidth, controlHeight);
+
+            _widthLabel.SetBounds(_xTextBox.Right + spacing, startY, labelWidth, controlHeight);
+            _widthTextBox.SetBounds(_widthLabel.Right, startY, textBoxWidth, controlHeight);
+
+            _pivotXLabel.SetBounds(_widthTextBox.Right + spacing, startY, labelWidth, controlHeight);
+            _pivotXTextBox.SetBounds(_pivotXLabel.Right, startY, textBoxWidth, controlHeight);
+
+            // Row 1 - Y, Height, Pivot Y
+            _yLabel.SetBounds(startX, row2Y, labelWidth, controlHeight);
+            _yTextBox.SetBounds(_yLabel.Right, row2Y, textBoxWidth, controlHeight);
+
+            _heightLabel.SetBounds(_yTextBox.Right + spacing, row2Y, labelWidth, controlHeight);
+            _heightTextBox.SetBounds(_heightLabel.Right, row2Y, textBoxWidth, controlHeight);
+
+            _pivotYLabel.SetBounds(_heightTextBox.Right + spacing, row2Y, labelWidth, controlHeight);
+            _pivotYTextBox.SetBounds(_pivotYLabel.Right, row2Y, textBoxWidth, controlHeight);
+        }
+
+        private Label CreateLabel(string text)
+        {
+            return new Label
+            {
+                Text = text,
+                ForeColor = Color.White,
+                TextAlign = ContentAlignment.MiddleRight,
+                AutoSize = false
+            };
+        }
+
+        public void AddTreeItem(SpriteReference reference)
+        {
+            if (reference.RectangleIndex == -1)
+            {
+                TreeNode node = new TreeNode(reference.Text)
+                {
+                    Tag = reference
+                };
+                _itemTreeView.Nodes.Add(node);
+            }
+            else
+            {
+                TreeNode? parentNode = FindSpriteNode(reference.SpriteIndex);
+                if (parentNode != null)
+                {
+                    TreeNode childNode = new TreeNode(reference.Text)
+                    {
+                        Tag = reference
+                    };
+                    parentNode.Nodes.Add(childNode);
+                }
+            }
+        }
+
+        public void AddTreeItems(IEnumerable<SpriteReference> items)
+        {
+            _itemTreeView.BeginUpdate();
+
+            var itemList = items.ToList();
+
+            // First pass: Add all parent nodes (RectangleIndex == -1)
+            foreach (var reference in itemList.Where(i => i.RectangleIndex == -1))
+            {
+                TreeNode node = new TreeNode(reference.Text)
+                {
+                    Tag = reference
+                };
+                _itemTreeView.Nodes.Add(node);
+            }
+
+            // Second pass: Add all child nodes (RectangleIndex >= 0)
+            foreach (var reference in itemList.Where(i => i.RectangleIndex >= 0))
+            {
+                TreeNode? parentNode = FindSpriteNode(reference.SpriteIndex);
+                if (parentNode != null)
+                {
+                    TreeNode childNode = new TreeNode(reference.Text)
+                    {
+                        Tag = reference
+                    };
+                    parentNode.Nodes.Add(childNode);
+                }
+            }
+
+            _itemTreeView.EndUpdate();
+        }
+
+        public void RemoveTreeItem(SpriteReference reference)
+        {
+            TreeNode? nodeToRemove = FindTreeNode(reference);
+            if (nodeToRemove != null)
+            {
+                if (nodeToRemove.Parent != null)
+                {
+                    nodeToRemove.Parent.Nodes.Remove(nodeToRemove);
+                }
+                else
+                {
+                    _itemTreeView.Nodes.Remove(nodeToRemove);
+                }
+
+                if (_selectedItem?.Equals(reference) == true)
+                {
+                    _selectedItem = null;
+                }
+            }
+        }
+
+        public void RemoveTreeItems(IEnumerable<SpriteReference> items)
+        {
+            _itemTreeView.BeginUpdate();
+
+            foreach (var reference in items)
+            {
+                RemoveTreeItem(reference);
+            }
+
+            _itemTreeView.EndUpdate();
+        }
+
+        public void RemoveSpriteNode(int spriteIndex)
+        {
+            TreeNode? spriteNode = FindSpriteNode(spriteIndex);
+            if (spriteNode != null)
+            {
+                _itemTreeView.Nodes.Remove(spriteNode);
+
+                if (_selectedItem?.SpriteIndex == spriteIndex)
+                {
+                    _selectedItem = null;
+                }
+            }
+        }
+
+        private TreeNode? FindTreeNode(SpriteReference reference)
+        {
+            if (reference.RectangleIndex == -1)
+            {
+                return FindSpriteNode(reference.SpriteIndex);
+            }
+            else
+            {
+                TreeNode? parentNode = FindSpriteNode(reference.SpriteIndex);
+                if (parentNode != null)
+                {
+                    foreach (TreeNode childNode in parentNode.Nodes)
+                    {
+                        if (childNode.Tag is SpriteReference childRef &&
+                            childRef.SpriteIndex == reference.SpriteIndex &&
+                            childRef.RectangleIndex == reference.RectangleIndex)
+                        {
+                            return childNode;
+                        }
+                    }
+                }
+            }
+            return null;
+        }
+
+        private TreeNode? FindSpriteNode(int spriteIndex)
+        {
+            foreach (TreeNode node in _itemTreeView.Nodes)
+            {
+                if (node.Tag is SpriteReference reference &&
+                    reference.SpriteIndex == spriteIndex &&
+                    reference.RectangleIndex == -1)
+                {
+                    return node;
+                }
+            }
+            return null;
+        }
+
+        public void PopulateTreeItems()
+        {
+            ClearTreeItems();
+            if (OpenPAK?.Data != null)
+            {
+                List<SpriteReference> spriteRefs = new List<SpriteReference>();
+                for (int i = 0; i < OpenPAK.Data.Sprites.Count; i++)
+                {
+                    SpriteReference reference = new SpriteReference(i, -1, $"Sprite {Convert.ToString(i)}");
+                    spriteRefs.Add(reference);
+                    for (int r = 0; r < OpenPAK.Data.Sprites[i].Rectangles.Count(); r++)
+                    {
+                        spriteRefs.Add(new SpriteReference(i, r, Convert.ToString(r)));
+                    }
+                }
+
+                AddTreeItems(spriteRefs);
+                if (!HasNodesInTreeView())
+                {
+                    mainWindow.SetStatusLabel("No sprites loaded, right click the treeview to add some!");
+                }
+                else
+                {
+                    mainWindow.SetStatusLabel("Idle...");
+                }
+            }
+        }
+
+        public bool HasNodesInTreeView()
+        {
+            return _itemTreeView.Nodes.Count > 0;
+        }
+
+        public void ClearTreeItems()
+        {
+            _itemTreeView.Nodes.Clear();
+            _selectedItem = null;
+        }
+
+        private void OnTreeViewItemSelected(object? sender, TreeViewEventArgs e)
+        {
+            if (e.Node?.Tag is SpriteReference reference)
+            {
+                _selectedItem = reference;
+            }
+            else
+            {
+                _selectedItem = null;
+            }
+
+            if(_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
+            {
+                var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
+                if (sprite != null)
+                {
+                    if(_currentBmp != null)
+                        _currentBmp.Dispose();
+
+                    _rectangles.Clear();
+                    _currentRectangle = Rectangle.Empty;
+                    X = 0;
+                    Y = 0;
+                    Width = 0;
+                    Height = 0;
+                    OffsetX = 0;
+                    OffsetY = 0;
+                    _xTextBox.Enabled = false;
+                    _yTextBox.Enabled = false;
+                    _widthTextBox.Enabled = false;
+                    _heightTextBox.Enabled = false;
+                    _pivotXTextBox.Enabled = false;
+                    _pivotYTextBox.Enabled = false;
+
+                    using (MemoryStream ms = new MemoryStream(sprite.data))
+                    {
+                        _currentBmp = new Bitmap(ms);
+                    }
+                    for (int i=0;i<sprite.Rectangles.Count();i++)
+                    {
+                        if(i == _selectedItem.Value.RectangleIndex)
+                        {
+                            var sprRect = sprite.Rectangles[i];
+                            _currentRectangle = new Rectangle(sprRect.x, sprRect.y, sprRect.width, sprRect.height);
+                            X = sprRect.x;
+                            Y = sprRect.y;
+                            Width = sprRect.width;
+                            Height = sprRect.height;
+                            OffsetX = sprRect.pivotX;
+                            OffsetY = sprRect.pivotY;
+                            _xTextBox.Enabled = true;
+                            _yTextBox.Enabled = true;
+                            _widthTextBox.Enabled = true;
+                            _heightTextBox.Enabled = true;
+                            _pivotXTextBox.Enabled = true;
+                            _pivotYTextBox.Enabled = true;
+                            _rectangleDimensionsStatusLabel.Text = $"{sprRect.width}x{sprRect.height}";
+                            continue;
+                        }
+
+                        var rect = sprite.Rectangles[i];
+                        _rectangles.Add(new Rectangle(rect.x, rect.y, rect.width, rect.height));
+                    }
+                    _imageInfoStatusLabel.Text = FileSignatureDetector.DetectFileType(sprite.data);
+                    _dimensionsStatusLabel.Text = $"{_currentBmp.Width}x{_currentBmp.Height}";
+                    _topPanel.Invalidate();
+                }
+            }
+        }
+    }
+
+    public struct SpriteReference
+    {
+        public int SpriteIndex { get; set; }
+        public int RectangleIndex { get; set; }
+        public string Text { get; set; }
+
+        public SpriteReference()
+        {
+            SpriteIndex = -1;
+            RectangleIndex = -1;
+            Text = string.Empty;
+        }
+
+        public SpriteReference(int spriteIndex, int rectangleIndex, string text)
+        {
+            SpriteIndex = spriteIndex;
+            RectangleIndex = rectangleIndex;
+            Text = text;
+        }
+    }
+
+    public class NumericTextBox<T> : TextBox where T : INumber<T>
+    {
+        public bool AllowNegative { get; set; } = false;
+
+        public NumericTextBox()
+        {
+            BorderStyle = BorderStyle.FixedSingle;
+            TextAlign = HorizontalAlignment.Center;
+        }
+
+        protected override void OnKeyPress(KeyPressEventArgs e)
+        {
+            if (!char.IsControl(e.KeyChar) && !char.IsDigit(e.KeyChar))
+            {
+                if (e.KeyChar == '-' && AllowNegative && SelectionStart == 0 && !Text.Contains('-'))
+                {
+                    base.OnKeyPress(e);
+                    return;
+                }
+                e.Handled = true;
+            }
+            base.OnKeyPress(e);
+        }
+
+        public void SetValue(T value)
+        {
+            Text = value.ToString();
+        }
+
+        public T GetValue()
+        {
+            if (string.IsNullOrWhiteSpace(Text))
+            {
+                return T.Zero;
+            }
+
+            // Try parsing as the largest type first to check for overflow
+            if (!double.TryParse(Text, out double doubleValue))
+            {
+                return T.Zero;
+            }
+
+            // Check if the value fits in the target type's range
+            T minValue = GetMinValue();
+            T maxValue = GetMaxValue();
+
+            if (T.TryParse(Text, System.Globalization.NumberStyles.Integer, null, out T? value))
+            {
+                // Verify the parsed value is within bounds
+                if (value >= minValue && value <= maxValue)
+                {
+                    return value;
+                }
+            }
+
+            // Value is out of range, clamp it
+            if (doubleValue < Convert.ToDouble(minValue))
+            {
+                return minValue;
+            }
+            if (doubleValue > Convert.ToDouble(maxValue))
+            {
+                return maxValue;
+            }
+
+            return T.Zero;
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            T value = GetValue();
+            SetValue(value);
+            base.OnLostFocus(e);
+        }
+
+        private T GetMinValue()
+        {
+            TypeCode code = Type.GetTypeCode(typeof(T));
+            return code switch
+            {
+                TypeCode.Byte => (T)(object)byte.MinValue,
+                TypeCode.SByte => (T)(object)sbyte.MinValue,
+                TypeCode.Int16 => (T)(object)short.MinValue,
+                TypeCode.UInt16 => (T)(object)ushort.MinValue,
+                TypeCode.Int32 => (T)(object)int.MinValue,
+                TypeCode.UInt32 => (T)(object)uint.MinValue,
+                TypeCode.Int64 => (T)(object)long.MinValue,
+                TypeCode.UInt64 => (T)(object)ulong.MinValue,
+                TypeCode.Single => (T)(object)float.MinValue,
+                TypeCode.Double => (T)(object)double.MinValue,
+                TypeCode.Decimal => (T)(object)decimal.MinValue,
+                _ => T.Zero
+            };
+        }
+
+        private T GetMaxValue()
+        {
+            TypeCode code = Type.GetTypeCode(typeof(T));
+            return code switch
+            {
+                TypeCode.Byte => (T)(object)byte.MaxValue,
+                TypeCode.SByte => (T)(object)sbyte.MaxValue,
+                TypeCode.Int16 => (T)(object)short.MaxValue,
+                TypeCode.UInt16 => (T)(object)ushort.MaxValue,
+                TypeCode.Int32 => (T)(object)int.MaxValue,
+                TypeCode.UInt32 => (T)(object)uint.MaxValue,
+                TypeCode.Int64 => (T)(object)long.MaxValue,
+                TypeCode.UInt64 => (T)(object)ulong.MaxValue,
+                TypeCode.Single => (T)(object)float.MaxValue,
+                TypeCode.Double => (T)(object)double.MaxValue,
+                TypeCode.Decimal => (T)(object)decimal.MaxValue,
+                _ => T.Zero
+            };
+        }
+    }
+
+    public class PAKTabEmpty : PAKTabTemplate
+    {
+        public PAKTabEmpty(MainWindow window) : base(window)
+        {
+            Text = "Empty";
+            window.SetStatusLabel("Create or open a PAK file in the top menu!");
+        }
+    }
+}
