@@ -209,6 +209,7 @@ namespace HBPakEditor
                         MessageBox.Show("Failed to read json, specifically rectangles...", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
 
                     selectedTab.PopulateTreeItems();
+                    pakTabControl.SetTabDirty(selectedTab, true);
                 }
             }
         }
