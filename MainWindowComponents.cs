@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -190,6 +191,41 @@ namespace HBPakEditor
             using var stream = GetEmbeddedResource(filePath);
             if (stream == null) return null;
             return new Icon(stream);
+        }
+
+
+        // instance handlers
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams cp = base.CreateParams;
+                return cp;
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            const int WM_COPYDATA = 0x004A;
+            if (m.Msg == WM_COPYDATA)
+            {
+                COPYDATASTRUCT cds = Marshal.PtrToStructure<COPYDATASTRUCT>(m.LParam);
+                byte[] data = new byte[cds.cbData];
+                Marshal.Copy(cds.lpData, data, 0, cds.cbData);
+                string message = Encoding.UTF8.GetString(data);
+                string[] files = message.Split('|');
+
+                Program.ProcessArgs(this, files);
+            }
+            base.WndProc(ref m);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct COPYDATASTRUCT
+        {
+            public IntPtr dwData;
+            public int cbData;
+            public IntPtr lpData;
         }
     }
 }
