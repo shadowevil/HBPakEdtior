@@ -455,6 +455,12 @@ namespace HBPakEditor
 
                 // Always enable the pakTabControl
                 pakTabControl.Enabled = true;
+
+                saveToolStripMenuItem.Enabled = true;
+                saveAsToolStripMenuItem.Enabled = true;
+                saveAllToolStripMenuItem.Enabled = true;
+                exportAllSpritesToolStripMenuItem.Enabled = true;
+                importAllSpritesToolStripMenuItem.Enabled = true;
             }
             catch (Exception ex)
             {
