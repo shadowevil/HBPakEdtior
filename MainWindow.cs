@@ -505,5 +505,31 @@ namespace HBPakEditor
                 MessageBox.Show(ex.Message, "Error!", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            // CTRL + S => Save current active PAK File
+            if (keyData == (Keys.Control | Keys.S))
+            {
+                SaveToolStripMenuItem_Click(this, EventArgs.Empty);
+                return true;
+            }
+
+            // CTRL + SHIFT + S => Save current active PAK File AS...
+            if (keyData == (Keys.Control | Keys.Shift | Keys.S))
+            {
+                SaveAsToolStripMenuItem_Click(this, EventArgs.Empty);
+                return true;
+            }
+
+            // CTRL + ALT + S => Save all tabs
+            if (keyData == (Keys.Control | Keys.Alt | Keys.S))
+            {
+                SaveAllToolStripMenuItem_Click(this, EventArgs.Empty);
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
     }
 }

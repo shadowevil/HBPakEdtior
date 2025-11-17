@@ -17,9 +17,8 @@ namespace HBPakEditor
         private TreeView _itemTreeView;
 
         // Right Top Panel
-        private Panel _topPanel;
+        private RenderedPanel _topPanel;
         private MenuStrip _topMenuStrip;
-        private ToolStripMenuItem _zoomMenuItem;
         private StatusStrip _topStatusStrip;
         private ToolStripStatusLabel _zoomStatusLabel;
         private ToolStripStatusLabel _dimensionsStatusLabel;
@@ -47,6 +46,9 @@ namespace HBPakEditor
 
         // Selection tracking
         private SpriteReference? _selectedItem;
+
+        private float _savedZoomLevel = 1.0f;
+        private PointF _savedPanOffset = PointF.Empty;
 
         // Properties
         public Int16 X
@@ -136,26 +138,19 @@ namespace HBPakEditor
             _rightSplitContainer.SplitterMoved += OnRightSplitterMoved;
 
             // Top panel with MenuStrip and StatusStrip
-            _topPanel = new Panel
+            _topPanel = new RenderedPanel
             {
                 Dock = DockStyle.Fill
             };
 
-            _topPanel.Paint += MainSpriteView_OnPaint;
+            _topPanel.OnRectangleDrawn = OnRectangleDrawnHandler;
+            _topPanel.OnRectangleClicked = OnRectangleClickedHandler;
 
             _topMenuStrip = new MenuStrip
             {
                 ForeColor = Color.White,
                 Dock = DockStyle.Top
             };
-
-            _zoomMenuItem = new ToolStripMenuItem("Zoom");
-            _zoomMenuItem.CheckOnClick = true;
-            _zoomMenuItem.CheckedChanged += (s, e) => {
-                _zoomMenuItem.BackColor = _zoomMenuItem.Checked ? Color.FromArgb(0, 122, 204) : Color.FromArgb(45, 45, 48);
-                _topPanel.Invalidate();
-            };
-            _topMenuStrip.Items.Add(_zoomMenuItem);
 
             _topStatusStrip = new StatusStrip
             {
@@ -176,6 +171,11 @@ namespace HBPakEditor
             _topStatusStrip.Items.Add(_imageInfoStatusLabel);
             _topStatusStrip.Items.Add(new ToolStripStatusLabel("|"));
             _topStatusStrip.Items.Add(_rectangleDimensionsStatusLabel);
+
+            _topPanel.ZoomStatusLabel = _zoomStatusLabel;
+            _topPanel.DimensionsStatusLabel = _dimensionsStatusLabel;
+            _topPanel.RectangleDimensionsStatusLabel = _rectangleDimensionsStatusLabel;
+            _topPanel.ImageInfoStatusLabel = _imageInfoStatusLabel;
 
             _topPanel.Controls.Add(_topStatusStrip);
             _topPanel.Controls.Add(_topMenuStrip);
@@ -240,6 +240,69 @@ namespace HBPakEditor
             PerformLayout();
         }
 
+        private void OnRectangleClickedHandler(SpriteReference rectangleRef, MouseButtons button, Point imageSpacePoint)
+        {
+            if (button == MouseButtons.Right || button == MouseButtons.Left)
+            {
+                // Select the rectangle in the tree
+                TreeNode? spriteNode = FindSpriteNode(rectangleRef.SpriteIndex);
+                if (spriteNode != null && rectangleRef.RectangleIndex < spriteNode.Nodes.Count)
+                {
+                    _itemTreeView.SelectedNode = spriteNode.Nodes[rectangleRef.RectangleIndex];
+                }
+            }
+        }
+
+        private bool OnRectangleDrawnHandler(Rectangle drawnRectangle)
+        {
+            if (OpenPAK?.Data != null && _selectedItem != null && _selectedItem.Value.SpriteIndex != -1)
+            {
+                var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
+                if (sprite != null)
+                {
+                    // Store the current sprite index
+                    int currentSpriteIndex = _selectedItem.Value.SpriteIndex;
+
+                    // Save current view state
+                    _savedZoomLevel = _topPanel.ZoomLevel;
+                    _savedPanOffset = _topPanel.PanOffset;
+
+                    // Add the new rectangle to the sprite
+                    sprite.Rectangles.Add(new PAKLib.SpriteRectangle
+                    {
+                        x = (short)drawnRectangle.X,
+                        y = (short)drawnRectangle.Y,
+                        width = (short)drawnRectangle.Width,
+                        height = (short)drawnRectangle.Height,
+                        pivotX = 0,
+                        pivotY = 0
+                    });
+
+                    // Refresh the tree
+                    PopulateTreeItems();
+
+                    // Select the newly added rectangle
+                    int newRectIndex = sprite.Rectangles.Count - 1;
+                    TreeNode? spriteNode = FindSpriteNode(currentSpriteIndex);
+                    if (spriteNode != null && newRectIndex < spriteNode.Nodes.Count)
+                    {
+                        spriteNode.Expand();
+                        _itemTreeView.SelectedNode = spriteNode.Nodes[newRectIndex];
+                    }
+
+                    // Restore view state AFTER tree selection
+                    _topPanel.ZoomLevel = _savedZoomLevel;
+                    _topPanel.PanOffset = _savedPanOffset;
+                    _topPanel.Invalidate();
+
+                    MarkTabDirty();
+                    return true; // Keep the rectangle
+                }
+            }
+
+            return false; // Don't keep the rectangle
+        }
+
         private void OnTreeViewMouseClick(object? sender, MouseEventArgs e)
         {
             if (this is PAKTabEmpty)
@@ -295,7 +358,8 @@ namespace HBPakEditor
                     // Rectangle node menu
                     menu.Items.Add("Delete Rectangle", null, (s, e) => OnDeleteRectangle(reference.Value));
                 }
-            } else
+            }
+            else
             {
                 menu.Items.Add("Add New Sprite", null, (s, e) => OnAddNewSprite());
             }
@@ -311,7 +375,7 @@ namespace HBPakEditor
             {
                 openFileDialog.Filter = "Image Files|*.png;*.bmp|All Files|*.*";
                 openFileDialog.Title = "Import New Sprite";
-                if(openFileDialog.ShowDialog() == DialogResult.OK)
+                if (openFileDialog.ShowDialog() == DialogResult.OK)
                 {
                     byte[] imageData = File.ReadAllBytes(openFileDialog.FileName);
                     PAKLib.Sprite newSprite = new PAKLib.Sprite
@@ -333,12 +397,12 @@ namespace HBPakEditor
                 var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
                 if (sprite != null)
                 {
-                    using(SaveFileDialog sfd = new SaveFileDialog())
+                    using (SaveFileDialog sfd = new SaveFileDialog())
                     {
                         sfd.Filter = "JSON File|*.json|All Files|*.*";
                         sfd.Title = "Export Sprite Rectangles";
                         sfd.FileName = $"sprite_{reference.SpriteIndex}_rectangles.json";
-                        if(sfd.ShowDialog() == DialogResult.OK)
+                        if (sfd.ShowDialog() == DialogResult.OK)
                         {
                             string json = JsonConvert.SerializeObject(sprite.Rectangles, Formatting.Indented);
                             File.WriteAllText(sfd.FileName, json);
@@ -364,22 +428,21 @@ namespace HBPakEditor
         {
             if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
             {
-                using(OpenFileDialog ofd = new OpenFileDialog())
+                using (OpenFileDialog ofd = new OpenFileDialog())
                 {
                     ofd.Filter = "Image Files|*.png;*.bmp;*.jpg;*.jpeg;*.gif|All Files|*.*";
                     ofd.Title = "Import Sprite Image";
-                    if(ofd.ShowDialog() == DialogResult.OK)
+                    if (ofd.ShowDialog() == DialogResult.OK)
                     {
                         byte[] imageData = File.ReadAllBytes(ofd.FileName);
                         OpenPAK.Data.Sprites[reference.SpriteIndex].data = imageData;
                         // Refresh current view if this sprite is selected
-                        if(_selectedItem != null && _selectedItem.Value.SpriteIndex == reference.SpriteIndex)
+                        if (_selectedItem != null && _selectedItem.Value.SpriteIndex == reference.SpriteIndex)
                         {
-                            using(MemoryStream ms = new MemoryStream(imageData))
+                            using (MemoryStream ms = new MemoryStream(imageData))
                             {
-                                _currentBmp = new Bitmap(ms);
+                                _topPanel.CurrentBitmap = new Bitmap(ms);
                             }
-                            _topPanel.Invalidate();
                             MarkTabDirty();
                         }
                     }
@@ -394,12 +457,12 @@ namespace HBPakEditor
                 var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
                 if (sprite != null)
                 {
-                    using(SaveFileDialog sfd = new SaveFileDialog())
+                    using (SaveFileDialog sfd = new SaveFileDialog())
                     {
                         sfd.Filter = "PNG Image|*.png|Bitmap Image|*.bmp";
                         sfd.Title = "Export Sprite Image";
                         sfd.FileName = $"sprite_{reference.SpriteIndex}.png";
-                        if(sfd.ShowDialog() == DialogResult.OK)
+                        if (sfd.ShowDialog() == DialogResult.OK)
                         {
                             File.WriteAllBytes(sfd.FileName, sprite.data);
                         }
@@ -410,6 +473,10 @@ namespace HBPakEditor
 
         private void OnAddRectangle(SpriteReference reference)
         {
+            // Save current view state
+            _savedZoomLevel = _topPanel.ZoomLevel;
+            _savedPanOffset = _topPanel.PanOffset;
+
             OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.Add(new PAKLib.SpriteRectangle
             {
                 x = 0,
@@ -420,7 +487,14 @@ namespace HBPakEditor
                 pivotY = 0
             });
             PopulateTreeItems();
+
             _itemTreeView.SelectedNode = _itemTreeView.Nodes[reference.SpriteIndex].LastNode;
+
+            // Restore view state AFTER tree operations
+            _topPanel.ZoomLevel = _savedZoomLevel;
+            _topPanel.PanOffset = _savedPanOffset;
+            _topPanel.Invalidate();
+
             MarkTabDirty();
         }
 
@@ -429,17 +503,27 @@ namespace HBPakEditor
             OpenPAK?.Data?.Sprites.RemoveAt(reference.SpriteIndex);
             PopulateTreeItems();
             _itemTreeView.SelectedNode = null;
-            _currentBmp = null;
-            _topPanel.Invalidate();
+            _topPanel.CurrentBitmap = null;
             MarkTabDirty();
         }
 
         private void OnDeleteRectangle(SpriteReference reference)
         {
+            // Save current view state
+            _savedZoomLevel = _topPanel.ZoomLevel;
+            _savedPanOffset = _topPanel.PanOffset;
+
             OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.RemoveAt(reference.RectangleIndex);
             PopulateTreeItems();
+
             _itemTreeView.Nodes[reference.SpriteIndex].Expand();
-            _currentRectangle = Rectangle.Empty;
+            _topPanel.CurrentRectangle = null;
+
+            // Restore view state AFTER tree operations
+            _topPanel.ZoomLevel = _savedZoomLevel;
+            _topPanel.PanOffset = _savedPanOffset;
+            _topPanel.Invalidate();
+
             MarkTabDirty();
         }
 
@@ -459,71 +543,10 @@ namespace HBPakEditor
                     rect.pivotY = OffsetY;
                     sprite.Rectangles[_selectedItem.Value.RectangleIndex] = rect;
                     // Update current rectangle
-                    _currentRectangle = new Rectangle(rect.x, rect.y, rect.width, rect.height);
+                    _topPanel.CurrentRectangle = new SpriteReference(_selectedItem.Value.SpriteIndex, _selectedItem.Value.RectangleIndex, _selectedItem.Value.RectangleIndex.ToString());
                     _topPanel.Invalidate();
                     MarkTabDirty();
                 }
-            }
-        }
-
-        private Bitmap? _currentBmp = null;
-        private List<Rectangle> _rectangles = new List<Rectangle>();
-        private Rectangle _currentRectangle = Rectangle.Empty;
-        private void MainSpriteView_OnPaint(object? sender, PaintEventArgs e)
-        {
-            if (_currentBmp == null)
-                return;
-            e.Graphics.Clear(_topPanel.BackColor);
-            e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
-            e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
-            e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.None;
-            e.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
-            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit;
-
-            // Center the image
-            int x = (_topPanel.ClientSize.Width - _currentBmp.Width) / 2;
-            int y = (_topPanel.ClientSize.Height - _currentBmp.Height) / 2;
-            int width = _currentBmp.Width;
-            int height = _currentBmp.Height;
-            bool zoomed = _zoomMenuItem.Checked;
-            float scaleFactor = 1.0f;
-            if (zoomed)
-            {
-                // Zoom to fit
-                float scaleX = (float)_topPanel.ClientSize.Width / _currentBmp.Width;
-                float scaleY = (float)_topPanel.ClientSize.Height / _currentBmp.Height;
-                scaleFactor = Math.Min(scaleX, scaleY) * 0.75f;
-                width = (int)(_currentBmp.Width * scaleFactor);
-                height = (int)(_currentBmp.Height * scaleFactor);
-                // Recalculate position
-                x = (_topPanel.ClientSize.Width - width) / 2;
-                y = (_topPanel.ClientSize.Height - height) / 2;
-
-                _zoomStatusLabel.Text = $"{(int)(scaleFactor * 100)}%";
-            }
-            e.Graphics.DrawImage(_currentBmp, x, y, width, height);
-
-            // Draw rectangles
-            if (_rectangles.Count > 0)
-            {
-                e.Graphics.DrawRectangles(Pens.Red, _rectangles.Select(r =>
-                    new Rectangle(
-                        (int)(r.X * scaleFactor) + x,
-                        (int)(r.Y * scaleFactor) + y,
-                        (int)(r.Width * scaleFactor),
-                        (int)(r.Height * scaleFactor)
-                    )).ToArray()
-                );
-            }
-
-            if (_currentRectangle != Rectangle.Empty)
-            {
-                e.Graphics.DrawRectangle(Pens.Lime, new Rectangle(
-                    (int)(_currentRectangle.X * scaleFactor) + x,
-                    (int)(_currentRectangle.Y * scaleFactor) + y,
-                    (int)(_currentRectangle.Width * scaleFactor),
-                    (int)(_currentRectangle.Height * scaleFactor)
-                ));
             }
         }
 
@@ -790,16 +813,13 @@ namespace HBPakEditor
                 _selectedItem = null;
             }
 
-            if(_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
+            if (_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
             {
                 var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
                 if (sprite != null)
                 {
-                    if(_currentBmp != null)
-                        _currentBmp.Dispose();
-
-                    _rectangles.Clear();
-                    _currentRectangle = Rectangle.Empty;
+                    _topPanel.Rectangles = new List<SpriteReference>();
+                    _topPanel.CurrentRectangle = null;
                     X = 0;
                     Y = 0;
                     Width = 0;
@@ -815,14 +835,16 @@ namespace HBPakEditor
 
                     using (MemoryStream ms = new MemoryStream(sprite.data))
                     {
-                        _currentBmp = new Bitmap(ms);
+                        _topPanel.CurrentBitmap = new Bitmap(ms);
                     }
-                    for (int i=0;i<sprite.Rectangles.Count();i++)
+
+                    var rectangles = new List<SpriteReference>();
+                    for (int i = 0; i < sprite.Rectangles.Count(); i++)
                     {
-                        if(i == _selectedItem.Value.RectangleIndex)
+                        if (i == _selectedItem.Value.RectangleIndex)
                         {
                             var sprRect = sprite.Rectangles[i];
-                            _currentRectangle = new Rectangle(sprRect.x, sprRect.y, sprRect.width, sprRect.height);
+                            _topPanel.CurrentRectangle = new SpriteReference(_selectedItem.Value.SpriteIndex, i, i.ToString());
                             X = sprRect.x;
                             Y = sprRect.y;
                             Width = sprRect.width;
@@ -840,11 +862,12 @@ namespace HBPakEditor
                         }
 
                         var rect = sprite.Rectangles[i];
-                        _rectangles.Add(new Rectangle(rect.x, rect.y, rect.width, rect.height));
+                        rectangles.Add(new SpriteReference(_selectedItem.Value.SpriteIndex, i, i.ToString()));
                     }
+                    _topPanel.Rectangles = rectangles;
+                    _topPanel.PAKData = OpenPAK; // Set the PAK data
                     _imageInfoStatusLabel.Text = FileSignatureDetector.DetectFileType(sprite.data);
-                    _dimensionsStatusLabel.Text = $"{_currentBmp.Width}x{_currentBmp.Height}";
-                    _topPanel.Invalidate();
+                    _dimensionsStatusLabel.Text = $"{_topPanel.CurrentBitmap.Width}x{_topPanel.CurrentBitmap.Height}";
                 }
             }
         }

@@ -23,10 +23,59 @@ namespace HBPakEditor
         private readonly Dictionary<T, bool> _tabDirtyStates = new();
         private readonly Dictionary<T, ContextMenuStrip> _tabPageMenus = new();
 
+        private ToolTip _tabToolTip;
+        private int _lastHoveredTabIndex = -1;
+
         // Constructor
         public RenamableTabControl()
         {
             MouseDoubleClick += OnMouseDoubleClick;
+
+            _tabToolTip = new ToolTip();
+            _tabToolTip.InitialDelay = 300;
+            _tabToolTip.AutoPopDelay = 5000;
+            _tabToolTip.ReshowDelay = 100;
+            _tabToolTip.ShowAlways = true;
+
+            MouseMove += OnTabMouseMove;
+            MouseLeave += OnTabMouseLeave;
+        }
+
+        private void OnTabMouseMove(object? sender, MouseEventArgs e)
+        {
+            int hoveredTabIndex = -1;
+
+            for (int i = 0; i < TabCount; i++)
+            {
+                Rectangle tabRect = GetTabRect(i);
+                if (tabRect.Contains(e.Location))
+                {
+                    hoveredTabIndex = i;
+                    break;
+                }
+            }
+
+            if (hoveredTabIndex != _lastHoveredTabIndex)
+            {
+                _lastHoveredTabIndex = hoveredTabIndex;
+                _tabToolTip.Hide(this);
+
+                if (hoveredTabIndex >= 0)
+                {
+                    T tabPage = GetTabPage(hoveredTabIndex);
+
+                    if (tabPage is PAKTabPage pakTabPage && !string.IsNullOrEmpty(pakTabPage.FilePath))
+                    {
+                        _tabToolTip.Show(pakTabPage.FilePath, this, e.X, e.Y, 5000);
+                    }
+                }
+            }
+        }
+
+        private void OnTabMouseLeave(object? sender, EventArgs e)
+        {
+            _lastHoveredTabIndex = -1;
+            _tabToolTip.Hide(this);
         }
 
         // Public methods - Dirty state management
@@ -254,6 +303,15 @@ namespace HBPakEditor
         {
             string baseText = tabPage.Text.TrimEnd('*');
             tabPage.Text = isDirty ? $"{baseText}*" : baseText;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _tabToolTip?.Dispose();
+            }
+            base.Dispose(disposing);
         }
     }
 }
