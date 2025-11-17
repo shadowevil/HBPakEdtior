@@ -130,7 +130,7 @@ namespace HBPakEditor
             {
                 if (!File.Exists(arg))
                     continue;
-                if (Path.GetExtension(arg) != ".pak" && Path.GetExtension(arg) != ".epak")
+                if (Path.GetExtension(arg).ToLower() != ".pak" && Path.GetExtension(arg).ToLower() != ".epak")
                     continue;
                 window.AddNewPAKTab(arg);
             }
