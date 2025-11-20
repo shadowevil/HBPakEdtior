@@ -123,7 +123,8 @@ namespace HBPakEditor
             _itemTreeView.AfterSelect += OnTreeViewItemSelected;
             //_itemTreeView.NodeMouseClick += OnTreeViewNodeMouseClick;
             _itemTreeView.MouseUp += OnTreeViewMouseClick;
-            _itemTreeView.KeyPress += OnItemViewKeyPress;
+            //_itemTreeView.KeyPress += OnItemViewKeyPress;
+            _itemTreeView.KeyUp += OnItemViewKeyUp;
             _mainSplitContainer.Panel1.Controls.Add(_itemTreeView);
 
             // Right split container (top viewport | bottom properties)
@@ -241,25 +242,62 @@ namespace HBPakEditor
             PerformLayout();
         }
 
-        private void OnItemViewKeyPress(object? sender, KeyPressEventArgs e)
+        private void OnItemViewKeyUp(object? sender, KeyEventArgs e)
         {
-            if (e.KeyChar == (char)Keys.Delete)
+            if (e.KeyCode == Keys.Delete)
             {
                 if (_itemTreeView.SelectedNode != null && _itemTreeView.SelectedNode.Tag is SpriteReference reference)
                 {
                     if (reference.RectangleIndex == -1)
                     {
-                        if(MessageBox.Show("Are you sure you want to delete this sprite?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+                        if (MessageBox.Show("Are you sure you want to delete this sprite?", "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                        {
+                            int spriteIndexToSelect = reference.SpriteIndex > 0 ? reference.SpriteIndex - 1 : (OpenPAK?.Data?.Sprites.Count ?? 1) > 1 ? 0 : -1;
                             OnDeleteSprite(reference);
+                            PopulateTreeItems();
+                            if (spriteIndexToSelect != -1 && _itemTreeView.Nodes.Count >= spriteIndexToSelect)
+                            {
+                                _itemTreeView.SelectedNode = _itemTreeView.Nodes[spriteIndexToSelect];
+                            }
+                        }
                     }
                     else
                     {
-                        if(MessageBox.Show("Are you sure you want to delete this rectangle?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+                        if (MessageBox.Show("Are you sure you want to delete this rectangle?", "Confirm Delete", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+                        {
+                            int spriteIndexToSelect = reference.SpriteIndex;
+                            int rectangleIndexToSelect = reference.RectangleIndex > 0 ? reference.RectangleIndex - 1 : (OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.Count ?? 1) > 1 ? 0 : -1;
                             OnDeleteRectangle(reference);
+                            PopulateTreeItems();
+                            if (rectangleIndexToSelect != -1 && _itemTreeView.Nodes[spriteIndexToSelect].Nodes.Count >= rectangleIndexToSelect)
+                            {
+                                _itemTreeView.SelectedNode = _itemTreeView.Nodes[spriteIndexToSelect].Nodes[rectangleIndexToSelect];
+                            }
+                        }
                     }
                 }
             }
         }
+
+        //private void OnItemViewKeyPress(object? sender, KeyPressEventArgs e)
+        //{
+        //    if (e.KeyChar == (char)Keys.Delete)
+        //    {
+        //        if (_itemTreeView.SelectedNode != null && _itemTreeView.SelectedNode.Tag is SpriteReference reference)
+        //        {
+        //            if (reference.RectangleIndex == -1)
+        //            {
+        //                if(MessageBox.Show("Are you sure you want to delete this sprite?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+        //                    OnDeleteSprite(reference);
+        //            }
+        //            else
+        //            {
+        //                if(MessageBox.Show("Are you sure you want to delete this rectangle?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+        //                    OnDeleteRectangle(reference);
+        //            }
+        //        }
+        //    }
+        //}
 
         private void OnRectangleClickedHandler(SpriteReference rectangleRef, MouseButtons button, Point imageSpacePoint)
         {
