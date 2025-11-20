@@ -123,6 +123,7 @@ namespace HBPakEditor
             _itemTreeView.AfterSelect += OnTreeViewItemSelected;
             //_itemTreeView.NodeMouseClick += OnTreeViewNodeMouseClick;
             _itemTreeView.MouseUp += OnTreeViewMouseClick;
+            _itemTreeView.KeyPress += OnItemViewKeyPress;
             _mainSplitContainer.Panel1.Controls.Add(_itemTreeView);
 
             // Right split container (top viewport | bottom properties)
@@ -238,6 +239,26 @@ namespace HBPakEditor
 
             ResumeLayout(false);
             PerformLayout();
+        }
+
+        private void OnItemViewKeyPress(object? sender, KeyPressEventArgs e)
+        {
+            if (e.KeyChar == (char)Keys.Delete)
+            {
+                if (_itemTreeView.SelectedNode != null && _itemTreeView.SelectedNode.Tag is SpriteReference reference)
+                {
+                    if (reference.RectangleIndex == -1)
+                    {
+                        if(MessageBox.Show("Are you sure you want to delete this sprite?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+                            OnDeleteSprite(reference);
+                    }
+                    else
+                    {
+                        if(MessageBox.Show("Are you sure you want to delete this rectangle?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
+                            OnDeleteRectangle(reference);
+                    }
+                }
+            }
         }
 
         private void OnRectangleClickedHandler(SpriteReference rectangleRef, MouseButtons button, Point imageSpacePoint)
@@ -362,8 +383,54 @@ namespace HBPakEditor
             else
             {
                 menu.Items.Add("Add New Sprite", null, (s, e) => OnAddNewSprite());
+                menu.Items.Add("Import New Sprite", null, (s, e) => OnImportNewSprite());
             }
             return menu;
+        }
+
+        private void OnImportNewSprite()
+        {
+            if (OpenPAK == null)
+                return;
+
+            if (OpenPAK?.Data != null)
+            {
+                bool ImportRectangles = MessageBox.Show("Import sprite rectangle along with image?\nMake sure they use the same name or structure.", "Import Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                using (OpenFileDialog ofd = new OpenFileDialog())
+                {
+                    ofd.Filter = "Image Files|*.png;*.bmp";
+                    ofd.Title = "Import New Sprite";
+                    ofd.Multiselect = false;
+
+                    if (ofd.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    string directory = Path.GetDirectoryName(ofd.FileName) ?? "";
+                    string expected_sprite_name = Path.GetFileName(ofd.FileName);
+
+                    var sprite_path = Path.Combine(directory, expected_sprite_name);
+                    PAKLib.Sprite spr = new();
+                    spr.data = File.ReadAllBytes(sprite_path);
+                    List<PAKLib.SpriteRectangle>? rects = null;
+
+                    if (ImportRectangles)
+                    {
+                        string expected_rectangles_name = Path.ChangeExtension(expected_sprite_name, ".json").Replace("_sprite_", "_rectangles_");
+                        var rectangles_path = Path.Combine(directory, expected_rectangles_name);
+                        rects = JsonConvert.DeserializeObject<List<PAKLib.SpriteRectangle>>(File.ReadAllText(rectangles_path));
+                        if (rects == null)
+                        {
+                            MessageBox.Show("Failed to import rectangles from JSON file.", "Import Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                            return;
+                        }
+                    }
+                    spr.Rectangles = rects ?? new();
+                    OpenPAK.Data.Sprites.Add(spr);
+
+                    PopulateTreeItems();
+                    MarkTabDirty();
+                }
+            }
         }
 
         private void OnAddNewSprite()
