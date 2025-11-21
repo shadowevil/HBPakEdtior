@@ -176,10 +176,12 @@ namespace HBPakEditor
                         return;
 
                     List<string> sprites = [.. Directory.GetFiles(fbd.SelectedPath, "*.bmp"), .. Directory.GetFiles(fbd.SelectedPath, "*.png")];
+                    sprites.Sort((a, b) => CompareSpriteNames(a, b));
                     List<string> rectangles = [];
                     if (ImportRectangles)
                     {
                         rectangles = [.. Directory.GetFiles(fbd.SelectedPath, "*.json")];
+                        rectangles.Sort((a, b) => CompareSpriteNames(a, b));
 
                         if (sprites.Count != rectangles.Count)
                         {
@@ -212,6 +214,28 @@ namespace HBPakEditor
                     pakTabControl.SetTabDirty(selectedTab, true);
                 }
             }
+        }
+
+        private static int CompareSpriteNames(string a, string b)
+        {
+            int na = ExtractTrailingNumber(a);
+            int nb = ExtractTrailingNumber(b);
+
+            if (na >= 0 && nb >= 0)
+                return na.CompareTo(nb);
+
+            return StringComparer.OrdinalIgnoreCase.Compare(a, b);
+        }
+
+        private static int ExtractTrailingNumber(string path)
+        {
+            string name = Path.GetFileNameWithoutExtension(path); // Whr_sprite_0
+            int underscore = name.LastIndexOf('_');
+            if (underscore < 0)
+                return -1;
+
+            string tail = name[(underscore + 1)..]; // "0"
+            return int.TryParse(tail, out int n) ? n : -1;
         }
 
         private void ExportAllSpritesToolStripMenuItem_Click(object? sender, EventArgs e)
