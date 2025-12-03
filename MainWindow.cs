@@ -165,7 +165,10 @@ namespace HBPakEditor
 
             if (OpenPAK?.Data != null)
             {
-                bool ImportRectangles = MessageBox.Show("Import sprite rectangles along with images?", "Import Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                var result = MessageBox.Show("Import sprite rectangles along with images?", "Import Options", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if(result == DialogResult.Cancel)
+                    return;
+                bool ImportRectangles = result == DialogResult.Yes;
                 using (FolderBrowserDialog fbd = new FolderBrowserDialog())
                 {
                     fbd.Description = "Select folder to import sprites";
@@ -216,7 +219,7 @@ namespace HBPakEditor
             }
         }
 
-        private static int CompareSpriteNames(string a, string b)
+        public static int CompareSpriteNames(string a, string b)
         {
             int na = ExtractTrailingNumber(a);
             int nb = ExtractTrailingNumber(b);
@@ -250,7 +253,10 @@ namespace HBPakEditor
 
             if (OpenPAK?.Data != null)
             {
-                bool ExportRectangles = MessageBox.Show("Export sprite rectangles along with sprite data?", "Export Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                var result = MessageBox.Show("Export sprite rectangles along with image?", "Export Options", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (result == DialogResult.Cancel)
+                    return;
+                bool exportRectangles = result == DialogResult.Yes;
                 using (FolderBrowserDialog fbd = new FolderBrowserDialog())
                 {
                     fbd.Description = "Select folder to export sprites";
@@ -268,7 +274,7 @@ namespace HBPakEditor
                                 string safeName = Path.GetFileNameWithoutExtension(selectedTab.FilePath!) + $"_sprite_{i}{fileExtension}";
                                 string safePath = Path.Combine(fbd.SelectedPath, safeName);
                                 File.WriteAllBytes(safePath, sprite.data);
-                                if (ExportRectangles)
+                                if (exportRectangles)
                                 {
                                     string rectFileName = Path.GetFileName(Path.ChangeExtension(safeName, ".json"));
                                     rectFileName = rectFileName.Replace("_sprite_", "_rectangles_");
@@ -307,9 +313,19 @@ namespace HBPakEditor
                 if (openFileDialog.ShowDialog() != DialogResult.OK)
                     return;
 
-                foreach(var filePath in openFileDialog.FileNames)
-                    AddNewPAKTab(filePath);
+                if(openFileDialog.FileNames.Length == 0)
+                    return;
 
+                if (openFileDialog.FileNames.Length == 1)
+                {
+                    AddNewPAKTab(openFileDialog.FileNames.First());
+                    pakTabControl.SelectedIndex = pakTabControl.TabCount - 1;
+                }
+                else
+                {
+                    foreach (var filePath in openFileDialog.FileNames)
+                        AddNewPAKTab(filePath);
+                }
                 saveToolStripMenuItem.Enabled = true;
                 saveAsToolStripMenuItem.Enabled = true;
                 saveAllToolStripMenuItem.Enabled = true;
@@ -329,6 +345,23 @@ namespace HBPakEditor
             if(MessageBox.Show("Are you sure you want to exit?", "Confirm Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
                 Application.Exit();
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            if (!pakTabControl.AreTabsDirty())
+            {
+                base.OnFormClosing(e);
+                return;
+            }
+
+            if (MessageBox.Show("Are you sure you want to exit?", "Confirm Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                e.Cancel = true;
+            } else
+            {
+                base.OnFormClosing(e);
             }
         }
 

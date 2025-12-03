@@ -7,7 +7,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <ApplicationIcon>PAKIcon.ico</ApplicationIcon>
-    <FileVersion>1.6.0.1</FileVersion>
+    <FileVersion>1.6.1.0</FileVersion>
     <AssemblyVersion>$(FileVersion)</AssemblyVersion>
   </PropertyGroup>
 

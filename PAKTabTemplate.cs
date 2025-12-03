@@ -1,8 +1,10 @@
 ﻿using Newtonsoft.Json;
+using PAKLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -406,9 +408,10 @@ namespace HBPakEditor
                     // Sprite node
                     menu.Items.Add("Add Rectangle", null, (s, e) => OnAddRectangle(reference.Value));
                     menu.Items.Add(new ToolStripSeparator());
-                    menu.Items.Add("Import Sprite", null, (s, e) => OnImportSprite(reference.Value));
+                    menu.Items.Add("Replace Sprite", null, (s, e) => OnReplaceSprite(reference.Value));
                     menu.Items.Add("Export Sprite", null, (s, e) => OnExportSprite(reference.Value));
                     menu.Items.Add("Export Rectangles", null, (s, e) => OnExportRectangles(reference.Value));
+                    menu.Items.Add("Import Rectangles", null, (s, e) => OnImportRectangles(reference.Value));
                     menu.Items.Add(new ToolStripSeparator());
                     menu.Items.Add("Delete Sprite", null, (s, e) => OnDeleteSprite(reference.Value));
                 }
@@ -426,6 +429,47 @@ namespace HBPakEditor
             return menu;
         }
 
+        private void OnImportRectangles(SpriteReference reference)
+        {   
+            if (OpenPAK == null)
+                return;
+
+            if (OpenPAK?.Data != null)
+            {
+                //var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                using (OpenFileDialog ofd = new OpenFileDialog())
+                {
+                    ofd.Filter = "JSON File|*.json|All Files|*.*";
+                    ofd.Title = "Import Rectangles";
+                    ofd.Multiselect = true;
+
+                    if(ofd.ShowDialog() != DialogResult.OK)
+                        return;
+
+                    List<string> json_imports = new List<string>();
+                    List<SpriteRectangle[]> json = new List<SpriteRectangle[]>();
+                    foreach(var filepath in ofd.FileNames)
+                    {
+                        json_imports.Add(File.ReadAllText(filepath));
+                        SpriteRectangle[]? rects = JsonConvert.DeserializeObject<SpriteRectangle[]>(json_imports.Last());
+                        if(rects == null)
+                            throw new Exception("Failed to import rectangles from JSON file.");
+
+                        json.Add(rects);
+                    }
+
+                    var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                    foreach(var rects in json)
+                    {
+                        sprite.Rectangles.AddRange(rects);
+                    }
+
+                    PopulateTreeItems();
+                    MarkTabDirty();
+                }
+            }
+        }
+
         private void OnImportNewSprite()
         {
             if (OpenPAK == null)
@@ -433,7 +477,10 @@ namespace HBPakEditor
 
             if (OpenPAK?.Data != null)
             {
-                bool ImportRectangles = MessageBox.Show("Import sprite rectangle along with image?\nMake sure they use the same name or structure.", "Import Options", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes;
+                var result = MessageBox.Show("Import sprite rectangles along with images?", "Import Options", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if (result == DialogResult.Cancel)
+                    return;
+                bool ImportRectangles = result == DialogResult.Yes;
                 using (OpenFileDialog ofd = new OpenFileDialog())
                 {
                     ofd.Filter = "Image Files|*.png;*.bmp";
@@ -500,13 +547,14 @@ namespace HBPakEditor
             if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
             {
                 var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                var pakname = Path.GetFileNameWithoutExtension(FilePath ?? "new");
                 if (sprite != null)
                 {
                     using (SaveFileDialog sfd = new SaveFileDialog())
                     {
                         sfd.Filter = "JSON File|*.json|All Files|*.*";
                         sfd.Title = "Export Sprite Rectangles";
-                        sfd.FileName = $"sprite_{reference.SpriteIndex}_rectangles.json";
+                        sfd.FileName = $"{pakname}_rectangles_{reference.SpriteIndex}.json";
                         if (sfd.ShowDialog() == DialogResult.OK)
                         {
                             string json = JsonConvert.SerializeObject(sprite.Rectangles, Formatting.Indented);
@@ -529,18 +577,20 @@ namespace HBPakEditor
             GetParentTabControl()?.SetTabDirty(this, true);
         }
 
-        private void OnImportSprite(SpriteReference reference)
+        private void OnReplaceSprite(SpriteReference reference)
         {
             if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
             {
                 using (OpenFileDialog ofd = new OpenFileDialog())
                 {
-                    ofd.Filter = "Image Files|*.png;*.bmp;*.jpg;*.jpeg;*.gif|All Files|*.*";
-                    ofd.Title = "Import Sprite Image";
+                    ofd.Filter = "Image Files|*.png;*.bmp|All Files|*.*";
+                    ofd.Title = "Replace Sprite Image";
                     if (ofd.ShowDialog() == DialogResult.OK)
                     {
                         byte[] imageData = File.ReadAllBytes(ofd.FileName);
-                        OpenPAK.Data.Sprites[reference.SpriteIndex].data = imageData;
+                        string extension = Path.GetExtension(ofd.FileName).TrimStart('.').ToUpper();
+                        byte[] converted = ImageConverter.Convert<byte[]>(imageData, extension);
+                        OpenPAK.Data.Sprites[reference.SpriteIndex].data = converted;
                         // Refresh current view if this sprite is selected
                         if (_selectedItem != null && _selectedItem.Value.SpriteIndex == reference.SpriteIndex)
                         {
@@ -559,17 +609,46 @@ namespace HBPakEditor
         {
             if (OpenPAK?.Data != null && reference.SpriteIndex != -1)
             {
+                var result = MessageBox.Show("Export sprite rectangles along with image?", "Export Options", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+                if(result == DialogResult.Cancel)
+                    return;
+                bool exportRectangles = result == DialogResult.Yes;
                 var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+                SpriteRectangle[]? rectangles = null;
+                if(exportRectangles)
+                    rectangles = OpenPAK.Data.Sprites[reference.SpriteIndex].Rectangles.ToArray();
+                var pakname = Path.GetFileNameWithoutExtension(FilePath ?? "new");
                 if (sprite != null)
                 {
                     using (SaveFileDialog sfd = new SaveFileDialog())
                     {
                         sfd.Filter = "PNG Image|*.png|Bitmap Image|*.bmp";
                         sfd.Title = "Export Sprite Image";
-                        sfd.FileName = $"sprite_{reference.SpriteIndex}.png";
+                        sfd.AddExtension = true;
+                        sfd.FileName = $"{pakname}_sprite_{reference.SpriteIndex}";
+                        string? rectangleFileName = null;
+                        if (exportRectangles)
+                            rectangleFileName = $"{pakname}_rectangles_{reference.SpriteIndex}.json";
                         if (sfd.ShowDialog() == DialogResult.OK)
                         {
-                            File.WriteAllBytes(sfd.FileName, sprite.data);
+                            var signature = FileSignatureDetector.DetectFileType(sprite.data);
+
+                            if (signature is not ("PNG" or "BMP"))
+                                throw new Exception($"Unsupported image format: {signature ?? "unknown"}. Only PNG and BMP are supported.");
+
+                            var targetFormat = Path.GetExtension(sfd.FileName).TrimStart('.').ToUpperInvariant();
+
+                            var data = targetFormat == signature
+                                ? sprite.data
+                                : ImageConverter.Convert<byte[]>(sprite.data, targetFormat);
+
+                            File.WriteAllBytes(sfd.FileName, data);
+                            if (exportRectangles && rectangleFileName != null)
+                            {
+                                string json = JsonConvert.SerializeObject(rectangles, Formatting.Indented);
+                                var rectangleFilePath = Path.Combine(Path.GetDirectoryName(sfd.FileName) ?? "", rectangleFileName);
+                                File.WriteAllText(rectangleFilePath, json);
+                            }
                         }
                     }
                 }
@@ -907,73 +986,77 @@ namespace HBPakEditor
             _selectedItem = null;
         }
 
+        private int _currentSpriteIndex = -1;
         private void OnTreeViewItemSelected(object? sender, TreeViewEventArgs e)
         {
-            if (e.Node?.Tag is SpriteReference reference)
+            _selectedItem = e.Node?.Tag is SpriteReference reference ? reference : null;
+
+            if (_selectedItem == null || OpenPAK?.Data == null || _selectedItem.Value.SpriteIndex == -1)
+                return;
+
+            var spriteIndex = _selectedItem.Value.SpriteIndex;
+            var sprite = OpenPAK.Data.Sprites[spriteIndex];
+            if (sprite == null)
+                return;
+
+            bool spriteChanged = spriteIndex != _currentSpriteIndex;
+
+            if (spriteChanged)
             {
-                _selectedItem = reference;
+                _currentSpriteIndex = spriteIndex;
+
+                using var ms = new MemoryStream(sprite.data);
+                _topPanel.CurrentBitmap = new Bitmap(ms);
+
+                _topPanel.PAKData = OpenPAK;
+                _imageInfoStatusLabel.Text = FileSignatureDetector.DetectFileType(sprite.data);
+                _dimensionsStatusLabel.Text = $"{_topPanel.CurrentBitmap.Width}x{_topPanel.CurrentBitmap.Height}";
+            }
+
+            // Update rectangles list
+            var rectangles = new List<SpriteReference>();
+            for (int i = 0; i < sprite.Rectangles.Count; i++)
+            {
+                if (i != _selectedItem.Value.RectangleIndex)
+                    rectangles.Add(new SpriteReference(spriteIndex, i, i.ToString()));
+            }
+            _topPanel.Rectangles = rectangles;
+
+            // Update selected rectangle
+            if (_selectedItem.Value.RectangleIndex >= 0 &&
+                _selectedItem.Value.RectangleIndex < sprite.Rectangles.Count)
+            {
+                var sprRect = sprite.Rectangles[_selectedItem.Value.RectangleIndex];
+                _topPanel.CurrentRectangle = new SpriteReference(spriteIndex, _selectedItem.Value.RectangleIndex, _selectedItem.Value.RectangleIndex.ToString());
+                X = sprRect.x;
+                Y = sprRect.y;
+                Width = sprRect.width;
+                Height = sprRect.height;
+                OffsetX = sprRect.pivotX;
+                OffsetY = sprRect.pivotY;
+                _xTextBox.Enabled = true;
+                _yTextBox.Enabled = true;
+                _widthTextBox.Enabled = true;
+                _heightTextBox.Enabled = true;
+                _pivotXTextBox.Enabled = true;
+                _pivotYTextBox.Enabled = true;
+                _rectangleDimensionsStatusLabel.Text = $"{sprRect.width}x{sprRect.height}";
             }
             else
             {
-                _selectedItem = null;
-            }
-
-            if (_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
-            {
-                var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
-                if (sprite != null)
-                {
-                    _topPanel.Rectangles = new List<SpriteReference>();
-                    _topPanel.CurrentRectangle = null;
-                    X = 0;
-                    Y = 0;
-                    Width = 0;
-                    Height = 0;
-                    OffsetX = 0;
-                    OffsetY = 0;
-                    _xTextBox.Enabled = false;
-                    _yTextBox.Enabled = false;
-                    _widthTextBox.Enabled = false;
-                    _heightTextBox.Enabled = false;
-                    _pivotXTextBox.Enabled = false;
-                    _pivotYTextBox.Enabled = false;
-
-                    using (MemoryStream ms = new MemoryStream(sprite.data))
-                    {
-                        _topPanel.CurrentBitmap = new Bitmap(ms);
-                    }
-
-                    var rectangles = new List<SpriteReference>();
-                    for (int i = 0; i < sprite.Rectangles.Count(); i++)
-                    {
-                        if (i == _selectedItem.Value.RectangleIndex)
-                        {
-                            var sprRect = sprite.Rectangles[i];
-                            _topPanel.CurrentRectangle = new SpriteReference(_selectedItem.Value.SpriteIndex, i, i.ToString());
-                            X = sprRect.x;
-                            Y = sprRect.y;
-                            Width = sprRect.width;
-                            Height = sprRect.height;
-                            OffsetX = sprRect.pivotX;
-                            OffsetY = sprRect.pivotY;
-                            _xTextBox.Enabled = true;
-                            _yTextBox.Enabled = true;
-                            _widthTextBox.Enabled = true;
-                            _heightTextBox.Enabled = true;
-                            _pivotXTextBox.Enabled = true;
-                            _pivotYTextBox.Enabled = true;
-                            _rectangleDimensionsStatusLabel.Text = $"{sprRect.width}x{sprRect.height}";
-                            continue;
-                        }
-
-                        var rect = sprite.Rectangles[i];
-                        rectangles.Add(new SpriteReference(_selectedItem.Value.SpriteIndex, i, i.ToString()));
-                    }
-                    _topPanel.Rectangles = rectangles;
-                    _topPanel.PAKData = OpenPAK; // Set the PAK data
-                    _imageInfoStatusLabel.Text = FileSignatureDetector.DetectFileType(sprite.data);
-                    _dimensionsStatusLabel.Text = $"{_topPanel.CurrentBitmap.Width}x{_topPanel.CurrentBitmap.Height}";
-                }
+                _topPanel.CurrentRectangle = null;
+                X = 0;
+                Y = 0;
+                Width = 0;
+                Height = 0;
+                OffsetX = 0;
+                OffsetY = 0;
+                _xTextBox.Enabled = false;
+                _yTextBox.Enabled = false;
+                _widthTextBox.Enabled = false;
+                _heightTextBox.Enabled = false;
+                _pivotXTextBox.Enabled = false;
+                _pivotYTextBox.Enabled = false;
             }
         }
     }

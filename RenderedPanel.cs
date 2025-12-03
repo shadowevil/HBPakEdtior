@@ -202,10 +202,22 @@ namespace HBPakEditor
             base.WndProc(ref m);
         }
 
+        private void FitImageToPanel(float padding = 0.85f)
+        {
+            if (_currentBmp == null)
+                return;
+
+            float scaleX = (float)ClientSize.Width / _currentBmp.Width;
+            float scaleY = (float)ClientSize.Height / _currentBmp.Height;
+
+            _zoomLevel = Math.Min(scaleX, scaleY) * padding;
+            _zoomLevel = Math.Max(0.1f, Math.Min(10.0f, _zoomLevel));
+            _panOffset = PointF.Empty;
+        }
+
         private void ResetViewTransform()
         {
-            _zoomLevel = 1.0f;
-            _panOffset = PointF.Empty;
+            FitImageToPanel();
             UpdateZoomLabel();
         }
 
@@ -213,6 +225,12 @@ namespace HBPakEditor
         {
             if (_zoomStatusLabel != null)
                 _zoomStatusLabel.Text = $"{(int)(_zoomLevel * 100)}%";
+        }
+
+        protected override void OnResize(EventArgs e)
+        {
+            base.OnResize(e);
+            Invalidate();
         }
 
         private void UpdateCursor()
