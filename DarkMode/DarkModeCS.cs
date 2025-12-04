@@ -237,7 +237,7 @@ namespace DarkModeForms
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message + ex.StackTrace, "ERROR", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                //MessageBox.Show(ex.Message + ex.StackTrace, "ERROR", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -664,30 +664,46 @@ namespace DarkModeForms
             }
             catch (Exception)
             {
-                return Color.CadetBlue;
+                return GetAccentColorFromRegistry() ?? Color.CadetBlue;
             }
+        }
+
+        private static Color? GetAccentColorFromRegistry()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\DWM");
+                if (key?.GetValue("AccentColor") is int color)
+                {
+                    return Color.FromArgb((color >> 24) & 0xFF, color & 0xFF, (color >> 8) & 0xFF, (color >> 16) & 0xFF);
+                }
+            }
+            catch { }
+            return null;
         }
 
         public static Color GetWindowsAccentOpaqueColor()
         {
-            DWMCOLORIZATIONcolors colors = new DWMCOLORIZATIONcolors();
-            DwmGetColorizationParameters(ref colors);
-
-            if (IsWindows10orGreater())
+            try
             {
-                var color = colors.ColorizationColor;
-                var colorValue = long.Parse(color.ToString(), System.Globalization.NumberStyles.HexNumber);
+                DWMCOLORIZATIONcolors colors = new DWMCOLORIZATIONcolors();
+                DwmGetColorizationParameters(ref colors);
 
-                var red = (colorValue >> 16) & 0xFF;
-                var green = (colorValue >> 8) & 0xFF;
-                var blue = (colorValue >> 0) & 0xFF;
+                if (IsWindows10orGreater())
+                {
+                    var color = colors.ColorizationColor;
+                    var colorValue = long.Parse(color.ToString(), System.Globalization.NumberStyles.HexNumber);
 
-                return Color.FromArgb(255, (int)red, (int)green, (int)blue);
+                    var red = (colorValue >> 16) & 0xFF;
+                    var green = (colorValue >> 8) & 0xFF;
+                    var blue = (colorValue >> 0) & 0xFF;
+
+                    return Color.FromArgb(255, (int)red, (int)green, (int)blue);
+                }
             }
-            else
-            {
-                return Color.CadetBlue;
-            }
+            catch (Exception)
+            { }
+            return Color.CadetBlue;
         }
 
         public static OSThemeColors GetSystemColors(Form Window = null, int ColorMode = 0)

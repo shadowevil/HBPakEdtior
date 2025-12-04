@@ -14,6 +14,9 @@ namespace HBPakEditor
     {
         MainWindow mainWindow = null!;
 
+        private UndoRedoManager _undoManager = new();
+        public UndoRedoManager UndoManager => _undoManager;
+
         // Left Panel
         private SplitContainer _mainSplitContainer;
         private TreeView _itemTreeView;
@@ -310,6 +313,10 @@ namespace HBPakEditor
                 if (spriteNode != null && rectangleRef.RectangleIndex < spriteNode.Nodes.Count)
                 {
                     _itemTreeView.SelectedNode = spriteNode.Nodes[rectangleRef.RectangleIndex];
+                    CaptureCurrentRectangle();
+                } else
+                {
+                    _rectangleBeforeEdit = null;
                 }
             }
         }
@@ -321,15 +328,12 @@ namespace HBPakEditor
                 var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
                 if (sprite != null)
                 {
-                    // Store the current sprite index
                     int currentSpriteIndex = _selectedItem.Value.SpriteIndex;
 
-                    // Save current view state
                     _savedZoomLevel = _topPanel.ZoomLevel;
                     _savedPanOffset = _topPanel.PanOffset;
 
-                    // Add the new rectangle to the sprite
-                    sprite.Rectangles.Add(new PAKLib.SpriteRectangle
+                    var newRect = new PAKLib.SpriteRectangle
                     {
                         x = (short)drawnRectangle.X,
                         y = (short)drawnRectangle.Y,
@@ -337,31 +341,45 @@ namespace HBPakEditor
                         height = (short)drawnRectangle.Height,
                         pivotX = 0,
                         pivotY = 0
-                    });
+                    };
 
-                    // Refresh the tree
-                    PopulateTreeItems();
+                    var cmd = new AddRectangleCommand(OpenPAK, currentSpriteIndex, newRect,
+                        onExecute: () =>
+                        {
+                            PopulateTreeItems();
+                            int newRectIndex = OpenPAK.Data.Sprites[currentSpriteIndex].Rectangles.Count - 1;
+                            TreeNode? spriteNode = FindSpriteNode(currentSpriteIndex);
+                            if (spriteNode != null && newRectIndex >= 0 && newRectIndex < spriteNode.Nodes.Count)
+                            {
+                                spriteNode.Expand();
+                                _itemTreeView.SelectedNode = spriteNode.Nodes[newRectIndex];
+                            }
+                            _topPanel.ZoomLevel = _savedZoomLevel;
+                            _topPanel.PanOffset = _savedPanOffset;
+                            _topPanel.Invalidate();
+                            MarkTabDirty();
+                        },
+                        onUndo: () =>
+                        {
+                            PopulateTreeItems();
+                            TreeNode? spriteNode = FindSpriteNode(currentSpriteIndex);
+                            if (spriteNode != null)
+                            {
+                                spriteNode.Expand();
+                                _itemTreeView.SelectedNode = spriteNode;
+                            }
+                            _topPanel.ZoomLevel = _savedZoomLevel;
+                            _topPanel.PanOffset = _savedPanOffset;
+                            _topPanel.Invalidate();
+                            MarkTabDirty();
+                        }
+                    );
 
-                    // Select the newly added rectangle
-                    int newRectIndex = sprite.Rectangles.Count - 1;
-                    TreeNode? spriteNode = FindSpriteNode(currentSpriteIndex);
-                    if (spriteNode != null && newRectIndex < spriteNode.Nodes.Count)
-                    {
-                        spriteNode.Expand();
-                        _itemTreeView.SelectedNode = spriteNode.Nodes[newRectIndex];
-                    }
-
-                    // Restore view state AFTER tree selection
-                    _topPanel.ZoomLevel = _savedZoomLevel;
-                    _topPanel.PanOffset = _savedPanOffset;
-                    _topPanel.Invalidate();
-
-                    MarkTabDirty();
-                    return true; // Keep the rectangle
+                    _undoManager.Execute(cmd);
+                    return true;
                 }
             }
-
-            return false; // Don't keep the rectangle
+            return false;
         }
 
         private void OnTreeViewMouseClick(object? sender, MouseEventArgs e)
@@ -657,29 +675,13 @@ namespace HBPakEditor
 
         private void OnAddRectangle(SpriteReference reference)
         {
-            // Save current view state
-            _savedZoomLevel = _topPanel.ZoomLevel;
-            _savedPanOffset = _topPanel.PanOffset;
-
-            OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.Add(new PAKLib.SpriteRectangle
+            var rect = new PAKLib.SpriteRectangle { x = 0, y = 0, width = 0, height = 0, pivotX = 0, pivotY = 0 };
+            var cmd = new AddRectangleCommand(OpenPAK, reference.SpriteIndex, rect, () =>
             {
-                x = 0,
-                y = 0,
-                width = 0,
-                height = 0,
-                pivotX = 0,
-                pivotY = 0
+                PopulateTreeItems();
+                MarkTabDirty();
             });
-            PopulateTreeItems();
-
-            _itemTreeView.SelectedNode = _itemTreeView.Nodes[reference.SpriteIndex].LastNode;
-
-            // Restore view state AFTER tree operations
-            _topPanel.ZoomLevel = _savedZoomLevel;
-            _topPanel.PanOffset = _savedPanOffset;
-            _topPanel.Invalidate();
-
-            MarkTabDirty();
+            _undoManager.Execute(cmd);
         }
 
         private void OnDeleteSprite(SpriteReference reference)
@@ -693,45 +695,47 @@ namespace HBPakEditor
 
         private void OnDeleteRectangle(SpriteReference reference)
         {
-            // Save current view state
-            _savedZoomLevel = _topPanel.ZoomLevel;
-            _savedPanOffset = _topPanel.PanOffset;
+            var cmd = new DeleteRectangleCommand(OpenPAK, reference.SpriteIndex, reference.RectangleIndex, () =>
+            {
+                PopulateTreeItems();
+                MarkTabDirty();
+            });
+            _undoManager.Execute(cmd);
+        }
 
-            OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.RemoveAt(reference.RectangleIndex);
-            PopulateTreeItems();
+        // Modify OnNumeric_FocusLost (track old value):
+        private SpriteRectangle? _rectangleBeforeEdit;
 
-            _itemTreeView.Nodes[reference.SpriteIndex].Expand();
-            _topPanel.CurrentRectangle = null;
-
-            // Restore view state AFTER tree operations
-            _topPanel.ZoomLevel = _savedZoomLevel;
-            _topPanel.PanOffset = _savedPanOffset;
-            _topPanel.Invalidate();
-
-            MarkTabDirty();
+        // Call this when selection changes to capture old state:
+        private void CaptureCurrentRectangle()
+        {
+            if (_selectedItem != null && OpenPAK?.Data != null &&
+                _selectedItem.Value.RectangleIndex >= 0)
+            {
+                _rectangleBeforeEdit = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex]
+                    .Rectangles[_selectedItem.Value.RectangleIndex];
+            }
         }
 
         private void OnNumeric_FocusLost(object? sender, EventArgs e)
         {
-            if (_selectedItem != null && OpenPAK?.Data != null && _selectedItem.Value.SpriteIndex != -1)
-            {
-                var sprite = OpenPAK.Data.Sprites[_selectedItem.Value.SpriteIndex];
-                if (sprite != null && _selectedItem.Value.RectangleIndex != -1)
+            if (_selectedItem == null || OpenPAK?.Data == null || _rectangleBeforeEdit == null)
+                return;
+
+            var newRect = new SpriteRectangle { x = X, y = Y, width = Width, height = Height, pivotX = OffsetX, pivotY = OffsetY };
+
+            // Skip if no change
+            if (_rectangleBeforeEdit.Equals(newRect))
+                return;
+
+            var cmd = new ModifyRectangleCommand(OpenPAK, _selectedItem.Value.SpriteIndex,
+                _selectedItem.Value.RectangleIndex, _rectangleBeforeEdit, newRect, () =>
                 {
-                    var rect = sprite.Rectangles[_selectedItem.Value.RectangleIndex];
-                    rect.x = X;
-                    rect.y = Y;
-                    rect.width = Width;
-                    rect.height = Height;
-                    rect.pivotX = OffsetX;
-                    rect.pivotY = OffsetY;
-                    sprite.Rectangles[_selectedItem.Value.RectangleIndex] = rect;
-                    // Update current rectangle
-                    _topPanel.CurrentRectangle = new SpriteReference(_selectedItem.Value.SpriteIndex, _selectedItem.Value.RectangleIndex, _selectedItem.Value.RectangleIndex.ToString());
                     _topPanel.Invalidate();
                     MarkTabDirty();
-                }
-            }
+                });
+            _undoManager.Execute(cmd);
+            _rectangleBeforeEdit = newRect;
         }
 
         private void OnMainSplitterMoved(object? sender, SplitterEventArgs e)
@@ -1034,6 +1038,9 @@ namespace HBPakEditor
                 Height = sprRect.height;
                 OffsetX = sprRect.pivotX;
                 OffsetY = sprRect.pivotY;
+
+                CaptureCurrentRectangle();
+
                 _xTextBox.Enabled = true;
                 _yTextBox.Enabled = true;
                 _widthTextBox.Enabled = true;
@@ -1044,6 +1051,7 @@ namespace HBPakEditor
             }
             else
             {
+                _rectangleBeforeEdit = null;
                 _topPanel.CurrentRectangle = null;
                 X = 0;
                 Y = 0;
@@ -1206,4 +1214,236 @@ namespace HBPakEditor
             window.SetStatusLabel("Create or open a PAK file in the top menu!");
         }
     }
+
+    #region Rectangle Commands
+
+    public class AddRectangleCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly SpriteRectangle _rectangle;
+        private readonly Action _onExecute;
+        private readonly Action _onUndo;
+
+        public string Description => "Add Rectangle";
+
+        public AddRectangleCommand(PAK pak, int spriteIndex, SpriteRectangle rectangle,
+            Action onExecute, Action? onUndo = null)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _rectangle = rectangle;
+            _onExecute = onExecute;
+            _onUndo = onUndo ?? onExecute;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles.Add(_rectangle);
+            _onExecute();
+        }
+
+        public void Undo()
+        {
+            var rects = _pak.Data.Sprites[_spriteIndex].Rectangles;
+            rects.RemoveAt(rects.Count - 1);
+            _onUndo();
+        }
+    }
+
+    public class DeleteRectangleCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly int _rectangleIndex;
+        private readonly SpriteRectangle _deletedRectangle;
+        private readonly Action _refreshUI;
+
+        public string Description => "Delete Rectangle";
+
+        public DeleteRectangleCommand(PAK pak, int spriteIndex, int rectangleIndex, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _rectangleIndex = rectangleIndex;
+            _deletedRectangle = pak.Data.Sprites[spriteIndex].Rectangles[rectangleIndex];
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles.RemoveAt(_rectangleIndex);
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles.Insert(_rectangleIndex, _deletedRectangle);
+            _refreshUI();
+        }
+    }
+
+    public class ModifyRectangleCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly int _rectangleIndex;
+        private readonly SpriteRectangle _oldValue;
+        private readonly SpriteRectangle _newValue;
+        private readonly Action _refreshUI;
+
+        public string Description => "Modify Rectangle";
+
+        public ModifyRectangleCommand(PAK pak, int spriteIndex, int rectangleIndex,
+            SpriteRectangle oldValue, SpriteRectangle newValue, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _rectangleIndex = rectangleIndex;
+            _oldValue = oldValue;
+            _newValue = newValue;
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles[_rectangleIndex] = _newValue;
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles[_rectangleIndex] = _oldValue;
+            _refreshUI();
+        }
+    }
+
+    #endregion
+
+    #region Sprite Commands
+    public class AddSpriteCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly Sprite _sprite;
+        private readonly Action _refreshUI;
+
+        public string Description => "Add Sprite";
+
+        public AddSpriteCommand(PAK pak, Sprite sprite, Action refreshUI)
+        {
+            _pak = pak;
+            _sprite = sprite;
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites.Add(_sprite);
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            _pak.Data.Sprites.RemoveAt(_pak.Data.Sprites.Count - 1);
+            _refreshUI();
+        }
+    }
+
+    public class DeleteSpriteCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly Sprite _deletedSprite;
+        private readonly Action _refreshUI;
+
+        public string Description => "Delete Sprite";
+
+        public DeleteSpriteCommand(PAK pak, int spriteIndex, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _deletedSprite = pak.Data.Sprites[spriteIndex];
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites.RemoveAt(_spriteIndex);
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            _pak.Data.Sprites.Insert(_spriteIndex, _deletedSprite);
+            _refreshUI();
+        }
+    }
+
+    public class ReplaceSpriteCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly byte[] _oldData;
+        private readonly byte[] _newData;
+        private readonly Action _refreshUI;
+
+        public string Description => "Replace Sprite";
+
+        public ReplaceSpriteCommand(PAK pak, int spriteIndex, byte[] newData, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _oldData = pak.Data.Sprites[spriteIndex].data;
+            _newData = newData;
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites[_spriteIndex].data = _newData;
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            _pak.Data.Sprites[_spriteIndex].data = _oldData;
+            _refreshUI();
+        }
+    }
+
+    public class ImportRectanglesCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly List<SpriteRectangle> _importedRectangles;
+        private readonly int _originalCount;
+        private readonly Action _refreshUI;
+
+        public string Description => "Import Rectangles";
+
+        public ImportRectanglesCommand(PAK pak, int spriteIndex, List<SpriteRectangle> rectangles, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _importedRectangles = rectangles;
+            _originalCount = pak.Data.Sprites[spriteIndex].Rectangles.Count;
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            _pak.Data.Sprites[_spriteIndex].Rectangles.AddRange(_importedRectangles);
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            var rects = _pak.Data.Sprites[_spriteIndex].Rectangles;
+            while (rects.Count > _originalCount)
+                rects.RemoveAt(rects.Count - 1);
+            _refreshUI();
+        }
+    }
+
+    #endregion
 }

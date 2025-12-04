@@ -5,6 +5,7 @@ using System.Linq;
 using System.Security.Cryptography.Xml;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
 
 namespace HBPakEditor
 {
@@ -68,6 +69,14 @@ namespace HBPakEditor
                 saveAllToolStripMenuItem.Enabled = false;
                 exportAllSpritesToolStripMenuItem.Enabled = false;
                 importAllSpritesToolStripMenuItem.Enabled = false;
+                compactAllSpritesToolStripMenuItem.Enabled = false;
+
+                saveToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Save);
+                saveAsToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.SaveAs);
+                saveAllToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.SaveAll);
+                exportAllSpritesToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Export);
+                importAllSpritesToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Import);
+                compactAllSpritesToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Compress);
             }
         }
 
@@ -331,6 +340,14 @@ namespace HBPakEditor
                 saveAllToolStripMenuItem.Enabled = true;
                 exportAllSpritesToolStripMenuItem.Enabled = true;
                 importAllSpritesToolStripMenuItem.Enabled = true;
+                compactAllSpritesToolStripMenuItem.Enabled = true;
+
+                saveToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Save);
+                saveAsToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAs);
+                saveAllToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAll);
+                exportAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Export);
+                importAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Import);
+                compactAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Compress);
             }
         }
 
@@ -506,7 +523,7 @@ namespace HBPakEditor
                 if (pakTabControl.TabPages.Count == 1 && pakTabControl.TabPages[0].Text.ToLower() == "empty" && !pakTabControl.Enabled)
                     pakTabControl.TabPages.Clear();
 
-                newTabPage.PopulateTreeItems();                    
+                newTabPage.PopulateTreeItems();
 
                 // Always add the new tab
                 pakTabControl.TabPages.Add(newTabPage);
@@ -519,6 +536,14 @@ namespace HBPakEditor
                 saveAllToolStripMenuItem.Enabled = true;
                 exportAllSpritesToolStripMenuItem.Enabled = true;
                 importAllSpritesToolStripMenuItem.Enabled = true;
+                compactAllSpritesToolStripMenuItem.Enabled = true;
+
+                saveToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Save);
+                saveAsToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAs);
+                saveAllToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAll);
+                exportAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Export);
+                importAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Import);
+                compactAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Compress);
             }
             catch (Exception ex)
             {
@@ -556,6 +581,14 @@ namespace HBPakEditor
                 saveAllToolStripMenuItem.Enabled = true;
                 exportAllSpritesToolStripMenuItem.Enabled = true;
                 importAllSpritesToolStripMenuItem.Enabled = true;
+                compactAllSpritesToolStripMenuItem.Enabled = true;
+
+                saveToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Save);
+                saveAsToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAs);
+                saveAllToolStripMenuItem.Image = IconFactory.GetIcon(IconType.SaveAll);
+                exportAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Export);
+                importAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Import);
+                compactAllSpritesToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Compress);
             }
             catch (Exception ex)
             {
@@ -586,7 +619,102 @@ namespace HBPakEditor
                 return true;
             }
 
+            var paktab = pakTabControl.SelectedTab as PAKTabTemplate;
+
+            if (keyData == (Keys.Control | Keys.Z))
+            {
+                paktab?.UndoManager.Undo();
+                return true;
+            }
+            if (keyData == (Keys.Control | Keys.Y))
+            {
+                paktab?.UndoManager.Redo();
+                return true;
+            }
             return base.ProcessCmdKey(ref msg, keyData);
+        }
+
+        private void EditToolStripMenuItem_DropDownOpening(object? sender, EventArgs e)
+        {
+            var paktab = pakTabControl.SelectedTab as PAKTabTemplate;
+
+            if (paktab == null)
+            {
+                undoToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Undo);
+                redoToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Redo);
+                undoToolStripMenuItem.Enabled = false;
+                redoToolStripMenuItem.Enabled = false;
+                return;
+            }
+
+            if (paktab!.UndoManager.CanRedo)
+            {
+                redoToolStripMenuItem.Enabled = true;
+                redoToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Redo);
+            }
+            else
+            {
+                redoToolStripMenuItem.Enabled = false;
+                redoToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Redo);
+            }
+
+            if (paktab!.UndoManager.CanUndo)
+            {
+                undoToolStripMenuItem.Enabled = true;
+                undoToolStripMenuItem.Image = IconFactory.GetIcon(IconType.Undo);
+            }
+            else
+            {
+                undoToolStripMenuItem.Enabled = false;
+                undoToolStripMenuItem.Image = IconFactory.GetIconDisabled(IconType.Undo);
+            }
+        }
+
+        private void RedoToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            var paktab = pakTabControl.SelectedTab as PAKTabTemplate;
+            paktab?.UndoManager.Redo();
+        }
+
+        private void UndoToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            var paktab = pakTabControl.SelectedTab as PAKTabTemplate;
+            paktab?.UndoManager.Undo();
+        }
+
+        private void CompactAllSpritesToolStripMenuItem_Click(object? sender, EventArgs e)
+        {
+            var result = MessageBox.Show("Do you want to compact all sprites in the current PAK?", "Confirm Compact", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+            if(result == DialogResult.Cancel)
+                return;
+
+            bool directoryMode = result == DialogResult.No;
+            bool pakMode = result == DialogResult.Yes;
+
+            if (directoryMode)
+            {
+                // Default directory mode
+                SpritePacker.SpritePackerForm compact = new SpritePacker.SpritePackerForm();
+                darkMode.ThemeControl(compact);
+                if(compact.ShowDialog(this) == DialogResult.Yes)
+                {
+                    var tab = pakTabControl.SelectedTab as PAKTabTemplate;
+                    tab.OpenPAK!.Data.Sprites.AddRange(compact.GetSprites());
+                    tab.PopulateTreeItems();
+                    pakTabControl.SetTabDirty(tab, true);
+                }
+            } else if(pakMode)
+            {
+                var tab = pakTabControl.SelectedTab as PAKTabTemplate;
+                SpritePacker.SpritePackerForm compact = new SpritePacker.SpritePackerForm(tab!.OpenPAK!, Path.GetFileNameWithoutExtension(tab.Name));
+                darkMode.ThemeControl(compact);
+                if(compact.ShowDialog(this) == DialogResult.OK)
+                {
+                    tab.OpenPAK!.Data.Sprites.AddRange(compact.GetSprites());
+                    tab.PopulateTreeItems();
+                    pakTabControl.SetTabDirty(tab, true);
+                }
+            }
         }
     }
 }

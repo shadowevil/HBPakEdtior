@@ -55,6 +55,23 @@ namespace HBPakEditor
         // Rectangle interaction callback
         public Action<SpriteReference, MouseButtons, Point>? OnRectangleClicked { get; set; }
 
+        // Viewmode only
+        public bool ViewOnlyMode { get; set; } = false;
+
+        // Show/hide hotkey legend
+        public bool ShowHotkeyLegend { get; set; } = true;
+
+        private List<Rectangle> _directRectangles = new List<Rectangle>();
+        public List<Rectangle> DirectRectangles
+        {
+            get => _directRectangles;
+            set
+            {
+                _directRectangles = value ?? new List<Rectangle>();
+                Invalidate();
+            }
+        }
+
         public Bitmap? CurrentBitmap
         {
             get => _currentBmp;
@@ -235,6 +252,15 @@ namespace HBPakEditor
 
         private void UpdateCursor()
         {
+            if (ViewOnlyMode)
+            {
+                if (_isSpaceHeld)
+                    Cursor = _isPanning ? Cursors.SizeAll : Cursors.Hand;
+                else
+                    Cursor = Cursors.Default;
+                return;
+            }
+
             if (_isShiftHeld && !_isDrawingRectangle)
             {
                 Cursor = Cursors.Cross;
@@ -450,23 +476,26 @@ namespace HBPakEditor
             base.OnMouseDown(e);
 
             // Check for rectangle click first (only when no modifier keys are held)
-            if ((e.Button == MouseButtons.Left || e.Button == MouseButtons.Right) &&
+            if (!ViewOnlyMode)
+            {
+                if ((e.Button == MouseButtons.Left || e.Button == MouseButtons.Right) &&
                 !_isShiftHeld && !_isSpaceHeld && !_isAltHeld && !_isCtrlHeld &&
                 _currentBmp != null)
-            {
-                PointF imagePoint = ScreenToImageSpace(e.Location);
-                Point imageSpacePoint = new Point((int)Math.Floor(imagePoint.X), (int)Math.Floor(imagePoint.Y));
-
-                SpriteReference? rectangleRef = GetRectangleAtPoint(imageSpacePoint, PAKData);
-
-                if (rectangleRef.HasValue)
                 {
-                    OnRectangleClicked?.Invoke(rectangleRef.Value, e.Button, imageSpacePoint);
-                    return; // Don't process other mouse actions
+                    PointF imagePoint = ScreenToImageSpace(e.Location);
+                    Point imageSpacePoint = new Point((int)Math.Floor(imagePoint.X), (int)Math.Floor(imagePoint.Y));
+
+                    SpriteReference? rectangleRef = GetRectangleAtPoint(imageSpacePoint, PAKData);
+
+                    if (rectangleRef.HasValue)
+                    {
+                        OnRectangleClicked?.Invoke(rectangleRef.Value, e.Button, imageSpacePoint);
+                        return; // Don't process other mouse actions
+                    }
                 }
             }
 
-            if (e.Button == MouseButtons.Left && _isShiftHeld && _currentBmp != null)
+            if (e.Button == MouseButtons.Left && _isShiftHeld && _currentBmp != null && !ViewOnlyMode)
             {
                 // Start drawing rectangle
                 PointF imagePoint = ScreenToImageSpace(e.Location);
@@ -798,67 +827,59 @@ namespace HBPakEditor
 
         private void DrawHotkeyLegend(Graphics g)
         {
-            string[] lines = new[]
-            {
-                "Alt + Scroll: Zoom at cursor",
-                "Ctrl + Alt + Scroll: Zoom at center",
-                "Space + Drag: Pan",
-                "Shift + Drag: Draw rectangle"
-            };
+            if (!ShowHotkeyLegend)
+                return;
+
+            var entries = ViewOnlyMode
+                ? new[] {
+                    ("Alt", "+ Scroll: Zoom at cursor", _isAltHeld),
+                    ("Ctrl + Alt", "+ Scroll: Zoom at center", _isCtrlHeld && _isAltHeld),
+                    ("Space", "+ Drag: Pan", _isSpaceHeld)
+                }
+                : new[] {
+                    ("Alt", "+ Scroll: Zoom at cursor", _isAltHeld),
+                    ("Ctrl + Alt", "+ Scroll: Zoom at center", _isCtrlHeld && _isAltHeld),
+                    ("Space", "+ Drag: Pan", _isSpaceHeld),
+                    ("Shift", "+ Drag: Draw rectangle", _isShiftHeld)
+                };
 
             float padding = 10f;
             float lineHeight = 20f;
             float maxWidth = 0f;
 
-            // Measure text to get max width
-            foreach (var line in lines)
+            foreach (var (hotkey, desc, _) in entries)
             {
-                SizeF size = g.MeasureString(line, _legendFont);
+                SizeF size = g.MeasureString(hotkey + " " + desc, _legendFont);
                 if (size.Width > maxWidth)
                     maxWidth = size.Width;
             }
 
             float boxWidth = maxWidth + (padding * 2);
-            float boxHeight = (lineHeight * lines.Length) + (padding * 2);
+            float boxHeight = (lineHeight * entries.Length) + (padding * 2);
             float boxX = ClientSize.Width - boxWidth - 10;
 
-            // Offset by status bar height
             int statusBarHeight = GetStatusBarHeight();
             float boxY = ClientSize.Height - boxHeight - 10 - statusBarHeight;
 
-            // Draw background
             g.FillRectangle(_legendBackgroundBrush, boxX, boxY, boxWidth, boxHeight);
 
-            // Draw legend text
             float textY = boxY + padding;
-
-            // Line 1: Alt + Scroll
-            DrawLegendLine(g, "Alt", _isAltHeld, boxX + padding, textY);
-            DrawLegendLine(g, " + Scroll: Zoom at cursor", false, boxX + padding + 25, textY, false);
-            textY += lineHeight;
-
-            // Line 2: Ctrl + Alt + Scroll
-            DrawLegendLine(g, "Ctrl", _isCtrlHeld, boxX + padding, textY);
-            DrawLegendLine(g, " + ", false, boxX + padding + 30, textY, false);
-            DrawLegendLine(g, "Alt", _isAltHeld, boxX + padding + 50, textY);
-            DrawLegendLine(g, " + Scroll: Zoom at center", false, boxX + padding + 75, textY, false);
-            textY += lineHeight;
-
-            // Line 3: Space + Drag
-            DrawLegendLine(g, "Space", _isSpaceHeld, boxX + padding, textY);
-            DrawLegendLine(g, " + Drag: Pan", false, boxX + padding + 45, textY, false);
-            textY += lineHeight;
-
-            // Line 4: Shift + Drag
-            DrawLegendLine(g, "Shift", _isShiftHeld, boxX + padding, textY);
-            DrawLegendLine(g, " + Drag: Draw rectangle", false, boxX + padding + 40, textY, false);
+            foreach (var (hotkey, desc, isActive) in entries)
+            {
+                DrawLegendLine(g, hotkey, desc, isActive, boxX + padding, textY);
+                textY += lineHeight;
+            }
         }
 
-        private void DrawLegendLine(Graphics g, string text, bool isActive, float x, float y, bool useKeyFont = true)
+        private void DrawLegendLine(Graphics g, string hotkey, string description, bool isActive, float x, float y)
         {
-            Font font = (isActive && useKeyFont) ? _legendFontBold : _legendFont;
-            Brush brush = (isActive && useKeyFont) ? _legendBrushActive : _legendBrush;
-            g.DrawString(text, font, brush, x, y);
+            Font hotkeyFont = isActive ? _legendFontBold : _legendFont;
+            Brush hotkeyBrush = isActive ? _legendBrushActive : _legendBrush;
+
+            g.DrawString(hotkey, hotkeyFont, hotkeyBrush, x, y);
+
+            float hotkeyWidth = g.MeasureString(hotkey + " ", hotkeyFont).Width;
+            g.DrawString(description, _legendFont, _legendBrush, x + hotkeyWidth, y);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -894,18 +915,43 @@ namespace HBPakEditor
             e.Graphics.DrawImage(_currentBmp, x, y, width, height);
 
             // Draw rectangles
-            if (_rectangles.Count > 0 && PAKData?.Data != null)
+            if (ViewOnlyMode)
             {
-                foreach (var spriteRef in _rectangles)
+                if (_directRectangles.Count > 0)
                 {
-                    Rectangle bounds = GetRectangleBounds(spriteRef, PAKData);
-                    if (bounds != Rectangle.Empty)
+                    //float centerX = ClientSize.Width / 2f;
+                    //float centerY = ClientSize.Height / 2f;
+                    //float width = _currentBmp.Width * _zoomLevel;
+                    //float height = _currentBmp.Height * _zoomLevel;
+                    //float x = centerX - (width / 2f) + _panOffset.X;
+                    //float y = centerY - (height / 2f) + _panOffset.Y;
+
+                    using var pen = new Pen(Color.Red, 1);
+                    foreach (var rect in _directRectangles)
                     {
-                        e.Graphics.DrawRectangle(Pens.Red,
-                            bounds.X * _zoomLevel + x,
-                            bounds.Y * _zoomLevel + y,
-                            bounds.Width * _zoomLevel,
-                            bounds.Height * _zoomLevel);
+                        e.Graphics.DrawRectangle(pen,
+                            rect.X * _zoomLevel + x,
+                            rect.Y * _zoomLevel + y,
+                            rect.Width * _zoomLevel,
+                            rect.Height * _zoomLevel);
+                    }
+                }
+            }
+            else
+            {
+                if (_rectangles.Count > 0 && PAKData?.Data != null)
+                {
+                    foreach (var spriteRef in _rectangles)
+                    {
+                        Rectangle bounds = GetRectangleBounds(spriteRef, PAKData);
+                        if (bounds != Rectangle.Empty)
+                        {
+                            e.Graphics.DrawRectangle(Pens.Red,
+                                bounds.X * _zoomLevel + x,
+                                bounds.Y * _zoomLevel + y,
+                                bounds.Width * _zoomLevel,
+                                bounds.Height * _zoomLevel);
+                        }
                     }
                 }
             }
