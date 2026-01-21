@@ -849,7 +849,8 @@ namespace SpritePacker
             repackButton.Enabled = true;
             primaryButton.Enabled = true;
             secondaryButton.Enabled = true;
-            tertiaryButton.Enabled = true;
+            if(tertiaryButton != null)
+                tertiaryButton.Enabled = true;
         }
 
         private List<SpriteSheet> LoadSpriteSheets(string directory)

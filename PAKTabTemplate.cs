@@ -284,26 +284,6 @@ namespace HBPakEditor
             }
         }
 
-        //private void OnItemViewKeyPress(object? sender, KeyPressEventArgs e)
-        //{
-        //    if (e.KeyChar == (char)Keys.Delete)
-        //    {
-        //        if (_itemTreeView.SelectedNode != null && _itemTreeView.SelectedNode.Tag is SpriteReference reference)
-        //        {
-        //            if (reference.RectangleIndex == -1)
-        //            {
-        //                if(MessageBox.Show("Are you sure you want to delete this sprite?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
-        //                    OnDeleteSprite(reference);
-        //            }
-        //            else
-        //            {
-        //                if(MessageBox.Show("Are you sure you want to delete this rectangle?","Confirm Delete",MessageBoxButtons.YesNo,MessageBoxIcon.Warning) == DialogResult.Yes)
-        //                    OnDeleteRectangle(reference);
-        //            }
-        //        }
-        //    }
-        //}
-
         private void OnRectangleClickedHandler(SpriteReference rectangleRef, MouseButtons button, Point imageSpacePoint)
         {
             if (button == MouseButtons.Right || button == MouseButtons.Left)

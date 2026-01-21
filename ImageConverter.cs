@@ -77,9 +77,21 @@ public static class ImageConverter
                 byte b = srcBuffer[i];
                 byte g = srcBuffer[i + 1];
                 byte r = srcBuffer[i + 2];
+                byte a = srcBuffer[i + 3];
 
-                if (r >= 250 && g <= 5 && b >= 250)
+                // If source already has transparency (PNG), preserve it
+                // If source is opaque but magenta (BMP color-key), make transparent
+                if (a < 255)
                 {
+                    // Source has alpha - preserve it (PNG source)
+                    dstBuffer[i] = b;
+                    dstBuffer[i + 1] = g;
+                    dstBuffer[i + 2] = r;
+                    dstBuffer[i + 3] = a;
+                }
+                else if (r >= 250 && g <= 5 && b >= 250)
+                {
+                    // Opaque magenta = transparent (BMP color-key)
                     dstBuffer[i] = 0;
                     dstBuffer[i + 1] = 0;
                     dstBuffer[i + 2] = 0;
@@ -87,6 +99,7 @@ public static class ImageConverter
                 }
                 else
                 {
+                    // Fully opaque pixel
                     dstBuffer[i] = b;
                     dstBuffer[i + 1] = g;
                     dstBuffer[i + 2] = r;
