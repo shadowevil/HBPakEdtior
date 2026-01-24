@@ -55,6 +55,36 @@ namespace HBPakEditor
         // Rectangle interaction callback
         public Action<SpriteReference, MouseButtons, Point>? OnRectangleClicked { get; set; }
 
+        // Color picker mode state
+        private bool _isColorPickerMode = false;
+        private const int COLOR_PICKER_CELL_SIZE = 16;
+        private const int COLOR_PICKER_GRID_SIZE = 3;
+
+        // Color picker callback - invoked when a color is selected
+        public Action<Color>? OnColorPicked { get; set; }
+
+        // Color picker cancelled callback
+        public Action? OnColorPickerCancelled { get; set; }
+
+        // Delete key callback - invoked when Delete key is pressed
+        public Action? OnDeleteKeyPressed { get; set; }
+
+        public bool IsColorPickerMode => _isColorPickerMode;
+
+        public void EnterColorPickerMode()
+        {
+            _isColorPickerMode = true;
+            UpdateCursor();
+            Invalidate();
+        }
+
+        public void ExitColorPickerMode()
+        {
+            _isColorPickerMode = false;
+            UpdateCursor();
+            Invalidate();
+        }
+
         // Viewmode only
         public bool ViewOnlyMode { get; set; } = false;
 
@@ -252,6 +282,12 @@ namespace HBPakEditor
 
         private void UpdateCursor()
         {
+            if (_isColorPickerMode)
+            {
+                Cursor = Cursors.Cross;
+                return;
+            }
+
             if (ViewOnlyMode)
             {
                 if (_isSpaceHeld)
@@ -475,6 +511,34 @@ namespace HBPakEditor
         {
             base.OnMouseDown(e);
 
+            // Handle color picker mode
+            if (_isColorPickerMode && _currentBmp != null)
+            {
+                if (e.Button == MouseButtons.Left)
+                {
+                    // Pick the color under the cursor
+                    PointF imagePoint = ScreenToImageSpace(e.Location);
+                    int pixelX = (int)Math.Floor(imagePoint.X);
+                    int pixelY = (int)Math.Floor(imagePoint.Y);
+
+                    if (pixelX >= 0 && pixelX < _currentBmp.Width &&
+                        pixelY >= 0 && pixelY < _currentBmp.Height)
+                    {
+                        Color pickedColor = _currentBmp.GetPixel(pixelX, pixelY);
+                        ExitColorPickerMode();
+                        OnColorPicked?.Invoke(pickedColor);
+                    }
+                    return;
+                }
+                else if (e.Button == MouseButtons.Right)
+                {
+                    // Cancel color picker mode
+                    ExitColorPickerMode();
+                    OnColorPickerCancelled?.Invoke();
+                    return;
+                }
+            }
+
             // Check for rectangle click first (only when no modifier keys are held)
             if (!ViewOnlyMode)
             {
@@ -590,6 +654,11 @@ namespace HBPakEditor
                 // Redraw to update pixel grid
                 Invalidate();
             }
+            else if (_isColorPickerMode)
+            {
+                // Redraw to update color picker grid
+                Invalidate();
+            }
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
@@ -629,6 +698,23 @@ namespace HBPakEditor
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
+
+            // Handle Escape to cancel color picker mode
+            if (e.KeyCode == Keys.Escape && _isColorPickerMode)
+            {
+                ExitColorPickerMode();
+                OnColorPickerCancelled?.Invoke();
+                e.Handled = true;
+                return;
+            }
+
+            // Handle Delete key to delete selected rectangle
+            if (e.KeyCode == Keys.Delete && !_isColorPickerMode)
+            {
+                OnDeleteKeyPressed?.Invoke();
+                e.Handled = true;
+                return;
+            }
 
             bool needsRedraw = false;
 
@@ -723,7 +809,7 @@ namespace HBPakEditor
 
         protected override bool IsInputKey(Keys keyData)
         {
-            if (keyData == Keys.Space || keyData == Keys.Alt || (keyData & Keys.Alt) == Keys.Alt)
+            if (keyData == Keys.Space || keyData == Keys.Alt || (keyData & Keys.Alt) == Keys.Alt || keyData == Keys.Delete)
                 return true;
             return base.IsInputKey(keyData);
         }
@@ -822,6 +908,150 @@ namespace HBPakEditor
             using (Pen borderPen = new Pen(Color.White, 2))
             {
                 g.DrawRectangle(borderPen, gridX, gridY, gridSize, gridSize);
+            }
+        }
+
+        private void DrawColorPickerGrid(Graphics g)
+        {
+            if (_currentBmp == null || !_isColorPickerMode)
+                return;
+
+            PointF imagePoint = ScreenToImageSpace(_currentMousePosition);
+            int centerPixelX = (int)Math.Floor(imagePoint.X);
+            int centerPixelY = (int)Math.Floor(imagePoint.Y);
+
+            // Check if mouse is within image bounds
+            if (centerPixelX < 0 || centerPixelX >= _currentBmp.Width ||
+                centerPixelY < 0 || centerPixelY >= _currentBmp.Height)
+                return;
+
+            int gridSize = COLOR_PICKER_GRID_SIZE * COLOR_PICKER_CELL_SIZE;
+            int gridX = _currentMousePosition.X + 20; // Offset from cursor
+            int gridY = _currentMousePosition.Y + 20;
+
+            // Keep grid on screen
+            if (gridX + gridSize > ClientSize.Width)
+                gridX = _currentMousePosition.X - gridSize - 20;
+            if (gridY + gridSize > ClientSize.Height)
+                gridY = _currentMousePosition.Y - gridSize - 20;
+
+            // Draw background (checkerboard pattern for transparency)
+            for (int dy = 0; dy < COLOR_PICKER_GRID_SIZE; dy++)
+            {
+                for (int dx = 0; dx < COLOR_PICKER_GRID_SIZE; dx++)
+                {
+                    int cellX = gridX + dx * COLOR_PICKER_CELL_SIZE;
+                    int cellY = gridY + dy * COLOR_PICKER_CELL_SIZE;
+
+                    // Draw checkerboard background for transparency visualization
+                    int checkSize = COLOR_PICKER_CELL_SIZE / 2;
+                    for (int cy = 0; cy < 2; cy++)
+                    {
+                        for (int cx = 0; cx < 2; cx++)
+                        {
+                            Color checkColor = ((cx + cy) % 2 == 0) ? Color.LightGray : Color.White;
+                            using (SolidBrush checkBrush = new SolidBrush(checkColor))
+                            {
+                                g.FillRectangle(checkBrush,
+                                    cellX + cx * checkSize,
+                                    cellY + cy * checkSize,
+                                    checkSize, checkSize);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Draw pixels
+            for (int dy = 0; dy < COLOR_PICKER_GRID_SIZE; dy++)
+            {
+                for (int dx = 0; dx < COLOR_PICKER_GRID_SIZE; dx++)
+                {
+                    int pixelX = centerPixelX - 1 + dx;
+                    int pixelY = centerPixelY - 1 + dy;
+
+                    if (pixelX >= 0 && pixelX < _currentBmp.Width &&
+                        pixelY >= 0 && pixelY < _currentBmp.Height)
+                    {
+                        Color pixelColor = _currentBmp.GetPixel(pixelX, pixelY);
+                        using (SolidBrush brush = new SolidBrush(pixelColor))
+                        {
+                            g.FillRectangle(brush,
+                                gridX + dx * COLOR_PICKER_CELL_SIZE,
+                                gridY + dy * COLOR_PICKER_CELL_SIZE,
+                                COLOR_PICKER_CELL_SIZE,
+                                COLOR_PICKER_CELL_SIZE);
+                        }
+                    }
+                }
+            }
+
+            // Draw grid lines
+            using (Pen gridPen = new Pen(Color.Gray, 1))
+            {
+                for (int i = 0; i <= COLOR_PICKER_GRID_SIZE; i++)
+                {
+                    // Vertical lines
+                    g.DrawLine(gridPen,
+                        gridX + i * COLOR_PICKER_CELL_SIZE, gridY,
+                        gridX + i * COLOR_PICKER_CELL_SIZE, gridY + gridSize);
+                    // Horizontal lines
+                    g.DrawLine(gridPen,
+                        gridX, gridY + i * COLOR_PICKER_CELL_SIZE,
+                        gridX + gridSize, gridY + i * COLOR_PICKER_CELL_SIZE);
+                }
+            }
+
+            // Get center pixel color for contrast outline
+            Color centerColor = _currentBmp.GetPixel(centerPixelX, centerPixelY);
+
+            // Calculate contrasting color for the outline
+            // Use luminance to determine if we should use white or black outline
+            double luminance = (0.299 * centerColor.R + 0.587 * centerColor.G + 0.114 * centerColor.B) / 255.0;
+            Color outlineColor = luminance > 0.5 ? Color.Black : Color.White;
+
+            // Draw contrast outline around center pixel (double outline for visibility)
+            int centerCellX = gridX + COLOR_PICKER_CELL_SIZE;
+            int centerCellY = gridY + COLOR_PICKER_CELL_SIZE;
+
+            // Outer outline (opposite color)
+            Color outerOutlineColor = luminance > 0.5 ? Color.White : Color.Black;
+            using (Pen outerPen = new Pen(outerOutlineColor, 3))
+            {
+                g.DrawRectangle(outerPen,
+                    centerCellX,
+                    centerCellY,
+                    COLOR_PICKER_CELL_SIZE,
+                    COLOR_PICKER_CELL_SIZE);
+            }
+
+            // Inner outline (contrasting)
+            using (Pen innerPen = new Pen(outlineColor, 1))
+            {
+                g.DrawRectangle(innerPen,
+                    centerCellX,
+                    centerCellY,
+                    COLOR_PICKER_CELL_SIZE,
+                    COLOR_PICKER_CELL_SIZE);
+            }
+
+            // Draw border around entire grid
+            using (Pen borderPen = new Pen(Color.DarkGray, 2))
+            {
+                g.DrawRectangle(borderPen, gridX - 1, gridY - 1, gridSize + 2, gridSize + 2);
+            }
+
+            // Draw instruction text below grid
+            string instruction = "Click to select color key";
+            using (Font font = new Font("Segoe UI", 8f))
+            {
+                SizeF textSize = g.MeasureString(instruction, font);
+                float textX = gridX + (gridSize - textSize.Width) / 2;
+                float textY = gridY + gridSize + 4;
+
+                // Draw text background
+                g.FillRectangle(Brushes.Black, textX - 2, textY - 1, textSize.Width + 4, textSize.Height + 2);
+                g.DrawString(instruction, font, Brushes.White, textX, textY);
             }
         }
 
@@ -985,6 +1215,9 @@ namespace HBPakEditor
 
             // Draw pixel grid preview
             DrawPixelGrid(e.Graphics);
+
+            // Draw color picker grid
+            DrawColorPickerGrid(e.Graphics);
 
             // Draw hotkey legend on top
             DrawHotkeyLegend(e.Graphics);

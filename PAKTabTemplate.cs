@@ -52,6 +52,9 @@ namespace HBPakEditor
         // Selection tracking
         private SpriteReference? _selectedItem;
 
+        // Auto-rectangle color picker state
+        private SpriteReference? _pendingAutoRectangleSprite;
+
         private float _savedZoomLevel = 1.0f;
         private PointF _savedPanOffset = PointF.Empty;
 
@@ -152,6 +155,9 @@ namespace HBPakEditor
 
             _topPanel.OnRectangleDrawn = OnRectangleDrawnHandler;
             _topPanel.OnRectangleClicked = OnRectangleClickedHandler;
+            _topPanel.OnColorPicked = OnColorPickedHandler;
+            _topPanel.OnColorPickerCancelled = OnColorPickerCancelledHandler;
+            _topPanel.OnDeleteKeyPressed = OnDeleteKeyPressedHandler;
 
             _topMenuStrip = new MenuStrip
             {
@@ -301,6 +307,36 @@ namespace HBPakEditor
             }
         }
 
+        private void OnDeleteKeyPressedHandler()
+        {
+            // Delete the currently selected rectangle (if a rectangle is selected)
+            if (_selectedItem == null || _selectedItem.Value.RectangleIndex == -1)
+                return;
+
+            var reference = _selectedItem.Value;
+            if (MessageBox.Show("Are you sure you want to delete this rectangle?", "Confirm Delete",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes)
+            {
+                int spriteIndexToSelect = reference.SpriteIndex;
+                int rectangleIndexToSelect = reference.RectangleIndex > 0
+                    ? reference.RectangleIndex - 1
+                    : (OpenPAK?.Data?.Sprites[reference.SpriteIndex].Rectangles.Count ?? 1) > 1 ? 0 : -1;
+
+                OnDeleteRectangle(reference);
+                PopulateTreeItems();
+
+                if (rectangleIndexToSelect != -1 && _itemTreeView.Nodes.Count > spriteIndexToSelect &&
+                    _itemTreeView.Nodes[spriteIndexToSelect].Nodes.Count > rectangleIndexToSelect)
+                {
+                    _itemTreeView.SelectedNode = _itemTreeView.Nodes[spriteIndexToSelect].Nodes[rectangleIndexToSelect];
+                }
+                else if (_itemTreeView.Nodes.Count > spriteIndexToSelect)
+                {
+                    _itemTreeView.SelectedNode = _itemTreeView.Nodes[spriteIndexToSelect];
+                }
+            }
+        }
+
         private bool OnRectangleDrawnHandler(Rectangle drawnRectangle)
         {
             if (OpenPAK?.Data != null && _selectedItem != null && _selectedItem.Value.SpriteIndex != -1)
@@ -405,6 +441,21 @@ namespace HBPakEditor
                 {
                     // Sprite node
                     menu.Items.Add("Add Rectangle", null, (s, e) => OnAddRectangle(reference.Value));
+
+                    // Show Auto-Rectangle and Auto-Grid Rectangles for PNG and BMP files
+                    if (OpenPAK?.Data != null && reference.Value.SpriteIndex >= 0 &&
+                        reference.Value.SpriteIndex < OpenPAK.Data.Sprites.Count)
+                    {
+                        var spriteData = OpenPAK.Data.Sprites[reference.Value.SpriteIndex].data;
+                        if (FileSignatureDetector.IsFileType(spriteData, "PNG") ||
+                            FileSignatureDetector.IsFileType(spriteData, "BMP"))
+                        {
+                            menu.Items.Add("Auto-Rectangle", null, (s, e) => OnAutoRectangle(reference.Value));
+                            menu.Items.Add("Auto-Grid Rectangles", null, (s, e) => OnAutoGridRectangles(reference.Value));
+                        }
+                    }
+
+                    menu.Items.Add("Clear Rectangles", null, (s, e) => OnClearRectangles(reference.Value));
                     menu.Items.Add(new ToolStripSeparator());
                     menu.Items.Add("Replace Sprite", null, (s, e) => OnReplaceSprite(reference.Value));
                     menu.Items.Add("Export Sprite", null, (s, e) => OnExportSprite(reference.Value));
@@ -662,6 +713,337 @@ namespace HBPakEditor
                 MarkTabDirty();
             });
             _undoManager.Execute(cmd);
+        }
+
+        private void OnAutoRectangle(SpriteReference reference)
+        {
+            if (OpenPAK?.Data == null || reference.SpriteIndex < 0)
+                return;
+
+            var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+            if (sprite == null)
+                return;
+
+            // Store the pending sprite reference and enter color picker mode
+            _pendingAutoRectangleSprite = reference;
+            _topPanel.EnterColorPickerMode();
+        }
+
+        private void OnColorPickedHandler(Color pickedColor)
+        {
+            if (_pendingAutoRectangleSprite == null || OpenPAK?.Data == null)
+                return;
+
+            var reference = _pendingAutoRectangleSprite.Value;
+            _pendingAutoRectangleSprite = null;
+
+            var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+            if (sprite == null)
+                return;
+
+            // Determine if this is a PNG or BMP
+            bool isPng = FileSignatureDetector.IsFileType(sprite.data, "PNG");
+
+            // Load the sprite as a bitmap
+            using var ms = new MemoryStream(sprite.data);
+            using var bitmap = new Bitmap(ms);
+
+            // Find all contiguous non-transparent regions using the picked color as transparency key
+            var detectedRectangles = FindContiguousRegions(bitmap, pickedColor, isPng);
+
+            if (detectedRectangles.Count == 0)
+            {
+                MessageBox.Show("No non-transparent regions found in the sprite.", "Auto-Rectangle",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Execute the auto-rectangle command
+            int spriteIndex = reference.SpriteIndex;
+            var cmd = new AutoRectangleCommand(OpenPAK, spriteIndex, detectedRectangles, () =>
+            {
+                PopulateTreeItems();
+                MarkTabDirty();
+
+                // Select the sprite node to refresh the RenderedPanel
+                TreeNode? spriteNode = FindSpriteNode(spriteIndex);
+                if (spriteNode != null)
+                {
+                    _itemTreeView.SelectedNode = spriteNode;
+                }
+            });
+            _undoManager.Execute(cmd);
+        }
+
+        private void OnColorPickerCancelledHandler()
+        {
+            _pendingAutoRectangleSprite = null;
+        }
+
+        private void OnAutoGridRectangles(SpriteReference reference)
+        {
+            if (OpenPAK?.Data == null || reference.SpriteIndex < 0)
+                return;
+
+            var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+            if (sprite == null)
+                return;
+
+            // Get image dimensions
+            using var ms = new MemoryStream(sprite.data);
+            using var bitmap = new Bitmap(ms);
+            int imageWidth = bitmap.Width;
+            int imageHeight = bitmap.Height;
+
+            // Show input dialog for cell size
+            var config = new InputBoxConfiguration
+            {
+                Required = true,
+                DefaultValue = "32",
+                MinLength = 1
+            };
+
+            var result = InputBox.Show("Enter grid cell size (width and height):", "Auto-Grid Rectangles", out string input, config);
+            if (result != DialogResult.OK)
+                return;
+
+            if (!int.TryParse(input, out int cellSize) || cellSize < 3)
+            {
+                MessageBox.Show("Cell size must be a number of at least 3.", "Invalid Input",
+                    MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Generate grid rectangles
+            var gridRectangles = GenerateGridRectangles(imageWidth, imageHeight, cellSize);
+
+            if (gridRectangles.Count == 0)
+            {
+                MessageBox.Show("No rectangles could be generated with the specified cell size.", "Auto-Grid Rectangles",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            // Execute the auto-rectangle command (reuse the same command class)
+            int spriteIndex = reference.SpriteIndex;
+            var cmd = new AutoRectangleCommand(OpenPAK, spriteIndex, gridRectangles, () =>
+            {
+                PopulateTreeItems();
+                MarkTabDirty();
+
+                // Select the sprite node to refresh the RenderedPanel
+                TreeNode? spriteNode = FindSpriteNode(spriteIndex);
+                if (spriteNode != null)
+                {
+                    _itemTreeView.SelectedNode = spriteNode;
+                }
+            });
+            _undoManager.Execute(cmd);
+        }
+
+        private List<SpriteRectangle> GenerateGridRectangles(int imageWidth, int imageHeight, int cellSize)
+        {
+            var rectangles = new List<SpriteRectangle>();
+            const int MIN_SIZE_THRESHOLD = 3;
+
+            for (int y = 0; y < imageHeight; y += cellSize)
+            {
+                for (int x = 0; x < imageWidth; x += cellSize)
+                {
+                    // Calculate the actual width and height, clipping to image bounds
+                    int rectWidth = Math.Min(cellSize, imageWidth - x);
+                    int rectHeight = Math.Min(cellSize, imageHeight - y);
+
+                    // Skip if either dimension is below the threshold
+                    if (rectWidth < MIN_SIZE_THRESHOLD || rectHeight < MIN_SIZE_THRESHOLD)
+                        continue;
+
+                    rectangles.Add(new SpriteRectangle
+                    {
+                        x = (short)x,
+                        y = (short)y,
+                        width = (short)rectWidth,
+                        height = (short)rectHeight,
+                        pivotX = 0,
+                        pivotY = 0
+                    });
+                }
+            }
+
+            return rectangles;
+        }
+
+        private void OnClearRectangles(SpriteReference reference)
+        {
+            if (OpenPAK?.Data == null || reference.SpriteIndex < 0)
+                return;
+
+            var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
+            if (sprite == null || sprite.Rectangles.Count == 0)
+                return;
+
+            // Use AutoRectangleCommand with an empty list to clear rectangles (supports undo)
+            int spriteIndex = reference.SpriteIndex;
+            var cmd = new AutoRectangleCommand(OpenPAK, spriteIndex, new List<SpriteRectangle>(), () =>
+            {
+                PopulateTreeItems();
+                MarkTabDirty();
+
+                // Select the sprite node to refresh the RenderedPanel
+                TreeNode? spriteNode = FindSpriteNode(spriteIndex);
+                if (spriteNode != null)
+                {
+                    _itemTreeView.SelectedNode = spriteNode;
+                }
+            });
+            _undoManager.Execute(cmd);
+        }
+
+        private List<SpriteRectangle> FindContiguousRegions(Bitmap bitmap, Color transparencyKey, bool useAlpha)
+        {
+            int width = bitmap.Width;
+            int height = bitmap.Height;
+            var visited = new bool[width, height];
+            var regions = new List<SpriteRectangle>();
+
+            // Lock bits for fast pixel access
+            var rect = new Rectangle(0, 0, width, height);
+            var bitmapData = bitmap.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+
+            try
+            {
+                int bytesPerPixel = 4;
+                int stride = bitmapData.Stride;
+                var pixels = new byte[stride * height];
+                System.Runtime.InteropServices.Marshal.Copy(bitmapData.Scan0, pixels, 0, pixels.Length);
+
+                byte keyB = transparencyKey.B;
+                byte keyG = transparencyKey.G;
+                byte keyR = transparencyKey.R;
+                byte keyA = transparencyKey.A;
+
+                // Scan for non-transparent pixels and flood-fill to find regions
+                for (int y = 0; y < height; y++)
+                {
+                    for (int x = 0; x < width; x++)
+                    {
+                        if (visited[x, y])
+                            continue;
+
+                        int pixelIndex = y * stride + x * bytesPerPixel;
+                        byte b = pixels[pixelIndex];
+                        byte g = pixels[pixelIndex + 1];
+                        byte r = pixels[pixelIndex + 2];
+                        byte a = pixels[pixelIndex + 3];
+
+                        // Check if this pixel matches the transparency key
+                        bool isTransparent;
+                        if (useAlpha)
+                        {
+                            // PNG: compare full ARGB
+                            isTransparent = (r == keyR && g == keyG && b == keyB && a == keyA);
+                        }
+                        else
+                        {
+                            // BMP: compare only RGB, ignore alpha
+                            isTransparent = (r == keyR && g == keyG && b == keyB);
+                        }
+
+                        if (isTransparent)
+                        {
+                            visited[x, y] = true;
+                            continue;
+                        }
+
+                        // Found a non-transparent pixel that hasn't been visited
+                        // Flood-fill to find the entire contiguous region
+                        var bounds = FloodFillRegion(pixels, visited, width, height, stride, bytesPerPixel,
+                            x, y, keyR, keyG, keyB, keyA, useAlpha);
+                        if (bounds.Width > 0 && bounds.Height > 0)
+                        {
+                            regions.Add(new SpriteRectangle
+                            {
+                                x = (short)bounds.X,
+                                y = (short)bounds.Y,
+                                width = (short)bounds.Width,
+                                height = (short)bounds.Height,
+                                pivotX = 0,
+                                pivotY = 0
+                            });
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                bitmap.UnlockBits(bitmapData);
+            }
+
+            return regions;
+        }
+
+        private Rectangle FloodFillRegion(byte[] pixels, bool[,] visited, int width, int height,
+            int stride, int bytesPerPixel, int startX, int startY,
+            byte keyR, byte keyG, byte keyB, byte keyA, bool useAlpha)
+        {
+            int minX = startX, maxX = startX;
+            int minY = startY, maxY = startY;
+
+            var stack = new Stack<(int x, int y)>();
+            stack.Push((startX, startY));
+
+            while (stack.Count > 0)
+            {
+                var (x, y) = stack.Pop();
+
+                if (x < 0 || x >= width || y < 0 || y >= height)
+                    continue;
+
+                if (visited[x, y])
+                    continue;
+
+                int pixelIndex = y * stride + x * bytesPerPixel;
+                byte b = pixels[pixelIndex];
+                byte g = pixels[pixelIndex + 1];
+                byte r = pixels[pixelIndex + 2];
+                byte a = pixels[pixelIndex + 3];
+
+                // Check if this pixel matches the transparency key
+                bool isTransparent;
+                if (useAlpha)
+                {
+                    // PNG: compare full ARGB
+                    isTransparent = (r == keyR && g == keyG && b == keyB && a == keyA);
+                }
+                else
+                {
+                    // BMP: compare only RGB, ignore alpha
+                    isTransparent = (r == keyR && g == keyG && b == keyB);
+                }
+
+                if (isTransparent)
+                {
+                    visited[x, y] = true;
+                    continue;
+                }
+
+                visited[x, y] = true;
+
+                // Update bounding box
+                minX = Math.Min(minX, x);
+                maxX = Math.Max(maxX, x);
+                minY = Math.Min(minY, y);
+                maxY = Math.Max(maxY, y);
+
+                // Add neighbors (4-connected)
+                stack.Push((x + 1, y));
+                stack.Push((x - 1, y));
+                stack.Push((x, y + 1));
+                stack.Push((x, y - 1));
+            }
+
+            return new Rectangle(minX, minY, maxX - minX + 1, maxY - minY + 1);
         }
 
         private void OnDeleteSprite(SpriteReference reference)
@@ -1294,6 +1676,43 @@ namespace HBPakEditor
         public void Undo()
         {
             _pak.Data.Sprites[_spriteIndex].Rectangles[_rectangleIndex] = _oldValue;
+            _refreshUI();
+        }
+    }
+
+    public class AutoRectangleCommand : IUndoableCommand
+    {
+        private readonly PAK _pak;
+        private readonly int _spriteIndex;
+        private readonly List<SpriteRectangle> _newRectangles;
+        private readonly List<SpriteRectangle> _oldRectangles;
+        private readonly Action _refreshUI;
+
+        public string Description => "Auto-Rectangle";
+
+        public AutoRectangleCommand(PAK pak, int spriteIndex, List<SpriteRectangle> newRectangles, Action refreshUI)
+        {
+            _pak = pak;
+            _spriteIndex = spriteIndex;
+            _newRectangles = newRectangles;
+            // Save the old rectangles for undo
+            _oldRectangles = new List<SpriteRectangle>(pak.Data.Sprites[spriteIndex].Rectangles);
+            _refreshUI = refreshUI;
+        }
+
+        public void Execute()
+        {
+            var rects = _pak.Data.Sprites[_spriteIndex].Rectangles;
+            rects.Clear();
+            rects.AddRange(_newRectangles);
+            _refreshUI();
+        }
+
+        public void Undo()
+        {
+            var rects = _pak.Data.Sprites[_spriteIndex].Rectangles;
+            rects.Clear();
+            rects.AddRange(_oldRectangles);
             _refreshUI();
         }
     }
