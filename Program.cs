@@ -36,9 +36,20 @@ namespace HBPakEditor
 
         private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
+        private static readonly string[] CliCommands = { "compact", "import", "extract", "info", "help", "--help", "-h" };
+
         [STAThread]
         static void Main(string[] args)
         {
+            // Check for CLI commands first
+            if (args.Length > 0 && CliCommands.Contains(args[0], StringComparer.OrdinalIgnoreCase))
+            {
+                // Run in console mode
+                AttachConsole(-1); // Attach to parent console if available
+                Environment.Exit(SpritePacker.SpritePackerCLI.Run(args));
+                return;
+            }
+
             ApplicationConfiguration.Initialize();
 
             if (args.Length > 0)
@@ -66,6 +77,9 @@ namespace HBPakEditor
             }
             Application.Run(window);
         }
+
+        [DllImport("kernel32.dll")]
+        private static extern bool AttachConsole(int dwProcessId);
 
         private static List<IntPtr> FindAllWindows()
         {

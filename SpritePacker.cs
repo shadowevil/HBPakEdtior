@@ -65,6 +65,616 @@ namespace SpritePacker
         Shield  // Shield - 7 sprites reordered to 12 armor format
     }
 
+    /// <summary>
+    /// Static class for CLI/headless compact operations
+    /// </summary>
+    public static class SpritePackerCLI
+    {
+        /// <summary>
+        /// Main CLI entry point - routes to appropriate command handler
+        /// </summary>
+        public static int Run(string[] args)
+        {
+            if (args.Length == 0)
+            {
+                PrintHelp();
+                return 1;
+            }
+
+            string command = args[0].ToLower();
+            return command switch
+            {
+                "help" or "--help" or "-h" => PrintHelp(),
+                "import" => RunImport(args),
+                "extract" => RunExtract(args),
+                "info" => RunInfo(args),
+                "compact" => RunCompact(args),
+                _ => UnknownCommand(command)
+            };
+        }
+
+        private static int UnknownCommand(string command)
+        {
+            Console.WriteLine($"Unknown command: {command}");
+            Console.WriteLine("Use 'HBPakEditor help' to see available commands.");
+            return 1;
+        }
+
+        private static int PrintHelp()
+        {
+            Console.WriteLine("HBPakEditor CLI - PAK file management tool");
+            Console.WriteLine();
+            Console.WriteLine("Commands:");
+            Console.WriteLine();
+            Console.WriteLine("  import <directory> <output.pak> [--rects]");
+            Console.WriteLine("    Import sprites from directory into a new PAK file");
+            Console.WriteLine("    --rects  Include rectangle data from JSON files");
+            Console.WriteLine();
+            Console.WriteLine("  extract <pak_file> <output_dir> [--rects] [--sprite <index>]");
+            Console.WriteLine("    Extract sprites from PAK to directory");
+            Console.WriteLine("    --rects         Also export rectangle data as JSON");
+            Console.WriteLine("    --sprite <n>    Extract only sprite at index n");
+            Console.WriteLine();
+            Console.WriteLine("  info <pak_file>");
+            Console.WriteLine("    Show PAK file information (sprites, rectangles, format, size)");
+            Console.WriteLine();
+            Console.WriteLine("  compact <mode> [options] <pak_file>");
+            Console.WriteLine("    Repack sprites in a PAK file");
+            Console.WriteLine("    Modes: row | tight | melee | bow | shield");
+            Console.WriteLine("    Options:");
+            Console.WriteLine("      grid <cols> <rows>  Use grid-based packing");
+            Console.WriteLine("      spacing <n>         Set spacing between sprites (default: 1)");
+            Console.WriteLine("      clear               Clear existing sprites before adding compacted ones");
+            Console.WriteLine("      -o <output.pak>     Output to different file instead of overwriting");
+            Console.WriteLine();
+            Console.WriteLine("  help");
+            Console.WriteLine("    Show this help message");
+            Console.WriteLine();
+            Console.WriteLine("Examples:");
+            Console.WriteLine("  HBPakEditor import ./sprites/ weapon.pak --rects");
+            Console.WriteLine("  HBPakEditor extract weapon.pak ./output/ --rects");
+            Console.WriteLine("  HBPakEditor extract weapon.pak ./output/ --sprite 5 --rects");
+            Console.WriteLine("  HBPakEditor info weapon.pak");
+            Console.WriteLine("  HBPakEditor compact melee clear -o new.pak weapon.pak");
+            Console.WriteLine("  HBPakEditor compact tight grid 8 8 spacing 2 weapon.pak");
+            return 0;
+        }
+
+        #region Import Command
+
+        private static int RunImport(string[] args)
+        {
+            // import <directory> <output.pak> [--rects]
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: HBPakEditor import <directory> <output.pak> [--rects]");
+                return 1;
+            }
+
+            string directory = args[1];
+            string outputPath = args[2];
+            bool importRects = args.Any(a => a.Equals("--rects", StringComparison.OrdinalIgnoreCase));
+
+            if (!Directory.Exists(directory))
+            {
+                Console.WriteLine($"Error: Directory not found: {directory}");
+                return 1;
+            }
+
+            try
+            {
+                Console.WriteLine($"Importing from: {directory}");
+                Console.WriteLine($"Output: {outputPath}");
+                Console.WriteLine($"Include rectangles: {importRects}");
+
+                // Get all image files sorted by trailing number
+                var sprites = Directory.GetFiles(directory, "*.bmp")
+                    .Concat(Directory.GetFiles(directory, "*.png"))
+                    .OrderBy(f => ExtractTrailingNumber(f))
+                    .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (sprites.Count == 0)
+                {
+                    Console.WriteLine("Error: No BMP or PNG files found in directory");
+                    return 1;
+                }
+
+                Console.WriteLine($"Found {sprites.Count} sprite files");
+
+                // Get rectangle files if needed
+                List<string> rectangles = new();
+                if (importRects)
+                {
+                    rectangles = Directory.GetFiles(directory, "*.json")
+                        .OrderBy(f => ExtractTrailingNumber(f))
+                        .ThenBy(f => f, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    if (rectangles.Count != sprites.Count)
+                    {
+                        Console.WriteLine($"Error: Sprite/rectangle count mismatch. Found {sprites.Count} sprites but {rectangles.Count} rectangle files.");
+                        return 1;
+                    }
+                }
+
+                // Load existing PAK or create new one
+                PAK pak;
+                if (File.Exists(outputPath))
+                {
+                    Console.WriteLine($"Appending to existing PAK...");
+                    pak = PAK.ReadFromFile(outputPath, "");
+                    if (pak?.Data == null)
+                    {
+                        pak = new PAK();
+                        pak.Data = new PAKLib.PAKData();
+                    }
+                }
+                else
+                {
+                    pak = new PAK();
+                    pak.Data = new PAKLib.PAKData();
+                }
+
+                int errors = 0;
+                for (int i = 0; i < sprites.Count; i++)
+                {
+                    var sprite = new PAKLib.Sprite();
+                    sprite.data = File.ReadAllBytes(sprites[i]);
+
+                    if (importRects && i < rectangles.Count)
+                    {
+                        var rects = Newtonsoft.Json.JsonConvert.DeserializeObject<List<PAKLib.SpriteRectangle>>(File.ReadAllText(rectangles[i]));
+                        if (rects != null)
+                            sprite.Rectangles = rects;
+                        else
+                            errors++;
+                    }
+
+                    pak.Data.Sprites.Add(sprite);
+                    Console.Write($"\rImported {i + 1}/{sprites.Count} sprites");
+                }
+                Console.WriteLine();
+
+                if (errors > 0)
+                    Console.WriteLine($"Warning: {errors} rectangle files failed to parse");
+
+                // Save PAK
+                Console.WriteLine($"Saving PAK: {outputPath}");
+                PAK.SaveToFile(pak, outputPath, "");
+
+                Console.WriteLine("Done!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        #endregion
+
+        #region Extract Command
+
+        private static int RunExtract(string[] args)
+        {
+            // extract <pak_file> <output_dir> [--rects] [--sprite <index>]
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: HBPakEditor extract <pak_file> <output_dir> [--rects] [--sprite <index>]");
+                return 1;
+            }
+
+            string pakPath = args[1];
+            string outputDir = args[2];
+            bool exportRects = args.Any(a => a.Equals("--rects", StringComparison.OrdinalIgnoreCase));
+            int? spriteIndex = null;
+
+            // Parse --sprite <index>
+            for (int i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i].Equals("--sprite", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(args[i + 1], out int idx))
+                        spriteIndex = idx;
+                    else
+                    {
+                        Console.WriteLine($"Error: Invalid sprite index: {args[i + 1]}");
+                        return 1;
+                    }
+                }
+            }
+
+            if (!File.Exists(pakPath))
+            {
+                Console.WriteLine($"Error: PAK file not found: {pakPath}");
+                return 1;
+            }
+
+            if (Path.GetExtension(pakPath).Equals(".epak", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("Error: Encrypted PAK files (.epak) are not supported in CLI mode");
+                return 1;
+            }
+
+            try
+            {
+                Console.WriteLine($"Loading PAK: {pakPath}");
+                var pak = PAK.ReadFromFile(pakPath, "");
+
+                if (pak?.Data == null || pak.Data.Sprites.Count == 0)
+                {
+                    Console.WriteLine("Error: PAK contains no sprites");
+                    return 1;
+                }
+
+                Console.WriteLine($"Found {pak.Data.Sprites.Count} sprites");
+
+                // Validate sprite index
+                if (spriteIndex.HasValue)
+                {
+                    if (spriteIndex.Value < 0 || spriteIndex.Value >= pak.Data.Sprites.Count)
+                    {
+                        Console.WriteLine($"Error: Sprite index {spriteIndex.Value} out of range (0-{pak.Data.Sprites.Count - 1})");
+                        return 1;
+                    }
+                }
+
+                // Create output directory
+                Directory.CreateDirectory(outputDir);
+
+                string pakName = Path.GetFileNameWithoutExtension(pakPath);
+                int startIdx = spriteIndex ?? 0;
+                int endIdx = spriteIndex.HasValue ? spriteIndex.Value + 1 : pak.Data.Sprites.Count;
+
+                for (int i = startIdx; i < endIdx; i++)
+                {
+                    var sprite = pak.Data.Sprites[i];
+                    if (sprite?.data == null) continue;
+
+                    // Determine extension from file signature
+                    string ext = HBPakEditor.FileSignatureDetector.GetFileExtension(sprite.data) ?? ".bin";
+                    string fileName = $"{pakName}_sprite_{i}{ext}";
+                    string filePath = Path.Combine(outputDir, fileName);
+
+                    File.WriteAllBytes(filePath, sprite.data);
+
+                    if (exportRects)
+                    {
+                        string rectFileName = $"{pakName}_rectangles_{i}.json";
+                        string rectPath = Path.Combine(outputDir, rectFileName);
+                        var rects = sprite.Rectangles ?? new List<PAKLib.SpriteRectangle>();
+                        File.WriteAllText(rectPath, Newtonsoft.Json.JsonConvert.SerializeObject(rects, Newtonsoft.Json.Formatting.Indented));
+                    }
+
+                    if (!spriteIndex.HasValue)
+                        Console.Write($"\rExtracted {i + 1}/{pak.Data.Sprites.Count} sprites");
+                }
+
+                if (!spriteIndex.HasValue)
+                    Console.WriteLine();
+                else
+                    Console.WriteLine($"Extracted sprite {spriteIndex.Value}");
+
+                Console.WriteLine($"Output directory: {outputDir}");
+                Console.WriteLine("Done!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        #endregion
+
+        #region Info Command
+
+        private static int RunInfo(string[] args)
+        {
+            // info <pak_file>
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: HBPakEditor info <pak_file>");
+                return 1;
+            }
+
+            string pakPath = args[1];
+
+            if (!File.Exists(pakPath))
+            {
+                Console.WriteLine($"Error: PAK file not found: {pakPath}");
+                return 1;
+            }
+
+            if (Path.GetExtension(pakPath).Equals(".epak", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("Error: Encrypted PAK files (.epak) are not supported in CLI mode");
+                return 1;
+            }
+
+            try
+            {
+                var pak = PAK.ReadFromFile(pakPath, "");
+
+                if (pak?.Data == null)
+                {
+                    Console.WriteLine("Error: Failed to read PAK file");
+                    return 1;
+                }
+
+                var fileInfo = new FileInfo(pakPath);
+                long fileSize = fileInfo.Length;
+                string sizeStr = FormatFileSize(fileSize);
+
+                Console.WriteLine($"File: {pakPath}");
+                Console.WriteLine($"Size: {sizeStr}");
+                Console.WriteLine($"Sprites: {pak.Data.Sprites.Count}");
+
+                if (pak.Data.Sprites.Count == 0)
+                    return 0;
+
+                // Determine format from first sprite
+                string format = "Unknown";
+                if (pak.Data.Sprites[0]?.data != null)
+                {
+                    format = HBPakEditor.FileSignatureDetector.DetectFileType(pak.Data.Sprites[0].data) ?? "Unknown";
+                }
+                Console.WriteLine($"Format: {format}");
+
+                // Count total rectangles
+                int totalRects = pak.Data.Sprites.Sum(s => s?.Rectangles?.Count ?? 0);
+                Console.WriteLine($"Total Rectangles: {totalRects}");
+
+                Console.WriteLine();
+                Console.WriteLine("Sprite Details:");
+                for (int i = 0; i < pak.Data.Sprites.Count; i++)
+                {
+                    var sprite = pak.Data.Sprites[i];
+                    if (sprite?.data == null)
+                    {
+                        Console.WriteLine($"  [{i}] (empty)");
+                        continue;
+                    }
+
+                    // Get dimensions by loading image
+                    string dims = "?x?";
+                    try
+                    {
+                        using var ms = new MemoryStream(sprite.data);
+                        using var img = System.Drawing.Image.FromStream(ms);
+                        dims = $"{img.Width}x{img.Height}";
+                    }
+                    catch { }
+
+                    int rectCount = sprite.Rectangles?.Count ?? 0;
+                    string spriteFormat = HBPakEditor.FileSignatureDetector.DetectFileType(sprite.data) ?? "?";
+                    Console.WriteLine($"  [{i}] {dims}, {rectCount} rects, {spriteFormat}");
+                }
+
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        private static string FormatFileSize(long bytes)
+        {
+            string[] sizes = { "B", "KB", "MB", "GB" };
+            int order = 0;
+            double size = bytes;
+            while (size >= 1024 && order < sizes.Length - 1)
+            {
+                order++;
+                size /= 1024;
+            }
+            return $"{size:0.##} {sizes[order]}";
+        }
+
+        #endregion
+
+        #region Compact Command
+
+        private static int RunCompact(string[] args)
+        {
+            // compact <mode> [grid <cols> <rows>] [spacing <n>] [clear] [-o <output.pak>] <pak_file>
+            if (args.Length < 3)
+            {
+                Console.WriteLine("Usage: HBPakEditor compact <mode> [options] <pak_file>");
+                Console.WriteLine("  Modes: row | tight | melee | bow | shield");
+                Console.WriteLine("  Options:");
+                Console.WriteLine("    grid <cols> <rows>  Use grid-based packing");
+                Console.WriteLine("    spacing <n>         Set spacing between sprites (default: 1)");
+                Console.WriteLine("    clear               Clear existing sprites before adding compacted ones");
+                Console.WriteLine("    -o <output.pak>     Output to different file instead of overwriting");
+                return 1;
+            }
+
+            // Parse mode
+            string modeStr = args[1].ToLower();
+            bool isItemMode = modeStr is "melee" or "weapon" or "bow" or "shield";
+            bool isPackMode = modeStr is "row" or "tight";
+
+            if (!isItemMode && !isPackMode)
+            {
+                Console.WriteLine($"Error: Unknown mode '{modeStr}'. Use row, tight, melee, bow, or shield.");
+                return 1;
+            }
+
+            // Parse options
+            bool clearExisting = false;
+            bool useGrid = false;
+            int gridCols = 8;
+            int gridRows = 100;
+            int spacing = 1;
+            string? outputPath = null;
+            string? pakPath = null;
+
+            for (int i = 2; i < args.Length; i++)
+            {
+                string arg = args[i].ToLower();
+
+                if (arg == "clear")
+                {
+                    clearExisting = true;
+                }
+                else if (arg == "grid" && i + 2 < args.Length)
+                {
+                    useGrid = true;
+                    if (!int.TryParse(args[i + 1], out gridCols) || !int.TryParse(args[i + 2], out gridRows))
+                    {
+                        Console.WriteLine("Error: Invalid grid dimensions");
+                        return 1;
+                    }
+                    i += 2;
+                }
+                else if (arg == "spacing" && i + 1 < args.Length)
+                {
+                    if (!int.TryParse(args[i + 1], out spacing))
+                    {
+                        Console.WriteLine("Error: Invalid spacing value");
+                        return 1;
+                    }
+                    i++;
+                }
+                else if (arg == "-o" && i + 1 < args.Length)
+                {
+                    outputPath = args[i + 1];
+                    i++;
+                }
+                else if (!arg.StartsWith("-"))
+                {
+                    pakPath = args[i];
+                }
+            }
+
+            if (string.IsNullOrEmpty(pakPath))
+            {
+                Console.WriteLine("Error: No PAK file specified");
+                return 1;
+            }
+
+            if (!File.Exists(pakPath))
+            {
+                Console.WriteLine($"Error: File not found: {pakPath}");
+                return 1;
+            }
+
+            if (Path.GetExtension(pakPath).Equals(".epak", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("Error: Encrypted PAK files (.epak) are not supported in CLI mode");
+                return 1;
+            }
+
+            outputPath ??= pakPath;
+
+            try
+            {
+                Console.WriteLine($"Loading PAK: {pakPath}");
+                var pak = PAK.ReadFromFile(pakPath, "");
+
+                if (pak?.Data == null || pak.Data.Sprites.Count == 0)
+                {
+                    Console.WriteLine("Error: PAK contains no sprites");
+                    return 1;
+                }
+
+                Console.WriteLine($"Found {pak.Data.Sprites.Count} sprites");
+                Console.WriteLine($"Mode: {modeStr}");
+                Console.WriteLine($"Clear existing: {clearExisting}");
+                if (useGrid)
+                    Console.WriteLine($"Grid: {gridCols}x{gridRows}");
+                Console.WriteLine($"Spacing: {spacing}");
+
+                if (isItemMode)
+                {
+                    // Item mode (melee/bow/shield)
+                    ItemModeType itemMode = modeStr switch
+                    {
+                        "melee" or "weapon" => ItemModeType.Melee,
+                        "bow" => ItemModeType.Bow,
+                        "shield" => ItemModeType.Shield,
+                        _ => ItemModeType.None
+                    };
+
+                    var compactor = new SpritePackerForm(pak, Path.GetFileNameWithoutExtension(pakPath));
+                    compactor.SetItemModeForCLI(itemMode, spacing);
+
+                    var compactedSprites = compactor.GetSprites();
+
+                    if (compactedSprites.Count == 0)
+                    {
+                        Console.WriteLine("Error: Compaction produced no sprites");
+                        return 1;
+                    }
+
+                    Console.WriteLine($"Compacted to {compactedSprites.Count} sprites");
+
+                    if (clearExisting)
+                        pak.Data.Sprites.Clear();
+
+                    pak.Data.Sprites.AddRange(compactedSprites);
+                }
+                else
+                {
+                    // Pack mode (row/tight)
+                    var compactor = new SpritePackerForm(pak, Path.GetFileNameWithoutExtension(pakPath));
+                    compactor.SetPackModeForCLI(
+                        modeStr == "tight" ? PackingMethod.TightCompact : PackingMethod.RowAligned,
+                        useGrid, gridCols, gridRows, spacing);
+
+                    var compactedSprites = compactor.GetSprites();
+
+                    if (compactedSprites.Count == 0)
+                    {
+                        Console.WriteLine("Error: Compaction produced no sprites");
+                        return 1;
+                    }
+
+                    Console.WriteLine($"Compacted to {compactedSprites.Count} sprites");
+
+                    if (clearExisting)
+                        pak.Data.Sprites.Clear();
+
+                    pak.Data.Sprites.AddRange(compactedSprites);
+                }
+
+                Console.WriteLine($"Saving PAK: {outputPath}");
+                PAK.SaveToFile(pak, outputPath, "");
+
+                Console.WriteLine("Done!");
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error: {ex.Message}");
+                return 1;
+            }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private static int ExtractTrailingNumber(string path)
+        {
+            string name = Path.GetFileNameWithoutExtension(path);
+            int underscore = name.LastIndexOf('_');
+            if (underscore < 0)
+                return int.MaxValue; // No number, sort at end
+
+            string tail = name[(underscore + 1)..];
+            return int.TryParse(tail, out int n) ? n : int.MaxValue;
+        }
+
+        #endregion
+    }
+
     public class SpritePackerForm : Form
     {
         // Packing parameters
@@ -640,6 +1250,233 @@ namespace SpritePacker
             statusLabel.Text = $"Loaded {pak.Data.Sprites.Count} sprites from PAK (Output: {formatStr})";
         }
 
+        /// <summary>
+        /// Set item mode and repack for CLI/headless use
+        /// </summary>
+        public void SetItemModeForCLI(ItemModeType mode, int spacingValue)
+        {
+            itemMode = mode;
+            spacing = spacingValue;
+
+            // Clear and reprocess with item mode
+            packedSheets.Clear();
+
+            if (itemMode == ItemModeType.Shield)
+            {
+                ProcessShieldModeCLI();
+            }
+            else
+            {
+                ProcessItemModeCLI();
+            }
+        }
+
+        /// <summary>
+        /// Set packing mode for CLI (row/tight)
+        /// </summary>
+        public void SetPackModeForCLI(PackingMethod method, bool gridMode, int cols, int rows, int spacingValue)
+        {
+            packingMethod = method;
+            useGridMode = gridMode;
+            spacing = spacingValue;
+
+            if (gridMode)
+            {
+                gridColumns = cols;
+                gridRows = rows;
+            }
+            else
+            {
+                maxWidth = 2000;
+                maxHeight = 5000;
+            }
+
+            // Clear and reprocess
+            packedSheets.Clear();
+            PackSpritesFromLoadedCLI();
+        }
+
+        /// <summary>
+        /// Pack sprites without UI updates (for CLI)
+        /// </summary>
+        private void PackSpritesFromLoadedCLI()
+        {
+            var allSprites = new List<(Bitmap source, SpriteRectangle rect)>();
+            foreach (var sheet in loadedSheets)
+            {
+                foreach (var rect in sheet.Rectangles)
+                    allSprites.Add((sheet.Image, rect));
+            }
+
+            int spriteIndex = 0;
+
+            while (spriteIndex < allSprites.Count)
+            {
+                var (bitmap, rects, count) = useGridMode
+                    ? PackSpritesGrid(allSprites, spriteIndex)
+                    : packingMethod == PackingMethod.TightCompact
+                        ? PackSpritesTight(allSprites, spriteIndex)
+                        : PackSprites(allSprites, spriteIndex);
+
+                packedSheets.Add(new PackedSheet
+                {
+                    Image = bitmap,
+                    Rectangles = rects,
+                    SpriteCount = count
+                });
+
+                spriteIndex += count;
+            }
+        }
+
+        /// <summary>
+        /// Process item mode without UI updates (for CLI)
+        /// </summary>
+        private void ProcessItemModeCLI()
+        {
+            if (loadedSheets.Count == 0) return;
+
+            // Validate sprite count
+            if (loadedSheets.Count < 56)
+            {
+                throw new InvalidOperationException($"Item mode requires 56 sprites (7 animations × 8 directions). Found only {loadedSheets.Count} sprites.");
+            }
+
+            // Define mapping from armor index to weapon index
+            int[] weaponMapping;
+            if (itemMode == ItemModeType.Melee)
+            {
+                weaponMapping = new[]
+                {
+                    WeaponAnimIndex.StandingPeace,
+                    WeaponAnimIndex.StandingCombat,
+                    WeaponAnimIndex.WalkingPeace,
+                    WeaponAnimIndex.WalkingCombat,
+                    WeaponAnimIndex.Running,
+                    -1,  // Attack Peace (blank)
+                    WeaponAnimIndex.AttackMelee,
+                    -1,  // Attack Bow (blank)
+                    -1, -1, -1, -1  // Cast, Pickup, Damage, Dying
+                };
+            }
+            else // Bow
+            {
+                // Note: Bows store their attack animation at PAK index 4 (AttackMelee slot),
+                // not index 5 (AttackBow slot). This is how original HB bow PAKs are structured.
+                weaponMapping = new[]
+                {
+                    WeaponAnimIndex.StandingPeace,
+                    WeaponAnimIndex.StandingCombat,
+                    WeaponAnimIndex.WalkingPeace,
+                    WeaponAnimIndex.WalkingCombat,
+                    WeaponAnimIndex.Running,
+                    -1, -1,  // Attack Peace, Attack Combat (blank)
+                    WeaponAnimIndex.AttackMelee,  // 7: Attack Bow - bows use melee slot in PAK
+                    -1, -1, -1, -1  // Cast, Pickup, Damage, Dying
+                };
+            }
+
+            using var blankSprite = CreateBlankSprite();
+
+            for (int armorIdx = 0; armorIdx < 12; armorIdx++)
+            {
+                int weaponIdx = weaponMapping[armorIdx];
+
+                Bitmap sheetBitmap;
+                var outputRects = new List<SpriteRectangle>();
+
+                if (weaponIdx < 0)
+                {
+                    sheetBitmap = new Bitmap(blankSprite);
+                }
+                else
+                {
+                    var directionSheets = new List<SpriteSheet>();
+                    for (int dir = 0; dir < 8; dir++)
+                    {
+                        int spriteIdx = weaponIdx * 8 + dir;
+                        if (spriteIdx < loadedSheets.Count)
+                        {
+                            directionSheets.Add(loadedSheets[spriteIdx]);
+                        }
+                    }
+                    (sheetBitmap, outputRects) = PackSpritesGrid8xN(directionSheets);
+                }
+
+                packedSheets.Add(new PackedSheet
+                {
+                    Image = sheetBitmap,
+                    Rectangles = outputRects,
+                    SpriteCount = outputRects.Count
+                });
+            }
+        }
+
+        /// <summary>
+        /// Process shield mode without UI updates (for CLI)
+        /// </summary>
+        private void ProcessShieldModeCLI()
+        {
+            if (loadedSheets.Count == 0) return;
+
+            if (loadedSheets.Count < 7)
+            {
+                throw new InvalidOperationException($"Shield mode requires 7 sprites. Found only {loadedSheets.Count} sprites.");
+            }
+
+            int[] shieldMapping = new[]
+            {
+                ShieldAnimIndex.StandingPeace,
+                ShieldAnimIndex.StandingCombat,
+                ShieldAnimIndex.WalkingPeace,
+                ShieldAnimIndex.WalkingCombat,
+                ShieldAnimIndex.Running,
+                -1,  // Attack Peace (blank)
+                ShieldAnimIndex.AttackMelee,
+                -1,  // Attack Bow (blank)
+                -1,  // Attack Cast (blank)
+                -1,  // Pickup (blank)
+                ShieldAnimIndex.TakeDamage,
+                -1   // Dying (blank)
+            };
+
+            using var blankSprite = CreateBlankSprite();
+
+            for (int armorIdx = 0; armorIdx < 12; armorIdx++)
+            {
+                int shieldIdx = shieldMapping[armorIdx];
+
+                Bitmap sheetBitmap;
+                var outputRects = new List<SpriteRectangle>();
+
+                if (shieldIdx < 0)
+                {
+                    sheetBitmap = new Bitmap(blankSprite);
+                }
+                else
+                {
+                    var sourceSheet = loadedSheets[shieldIdx];
+                    sheetBitmap = new Bitmap(sourceSheet.Image);
+                    outputRects = sourceSheet.Rectangles.Select(r => new SpriteRectangle
+                    {
+                        x = r.x,
+                        y = r.y,
+                        width = r.width,
+                        height = r.height,
+                        pivotX = r.pivotX,
+                        pivotY = r.pivotY
+                    }).ToList();
+                }
+
+                packedSheets.Add(new PackedSheet
+                {
+                    Image = sheetBitmap,
+                    Rectangles = outputRects,
+                    SpriteCount = outputRects.Count
+                });
+            }
+        }
+
         private static bool IsBmpData(byte[] data)
         {
             if (data == null || data.Length < 2)
@@ -830,6 +1667,8 @@ namespace SpritePacker
 
         /// <summary>
         /// Weapon PAK sprite indices (each has 8 direction frames)
+        /// Note: Bows store their attack animation at AttackMelee (index 4), not AttackBow (index 5).
+        /// The AttackBow slot in bow PAKs is typically empty/unused.
         /// </summary>
         private static class WeaponAnimIndex
         {
@@ -837,8 +1676,8 @@ namespace SpritePacker
             public const int StandingCombat = 1;  // Sprites 8-15
             public const int WalkingPeace = 2;    // Sprites 16-23
             public const int WalkingCombat = 3;   // Sprites 24-31
-            public const int AttackMelee = 4;     // Sprites 32-39
-            public const int AttackBow = 5;       // Sprites 40-47
+            public const int AttackMelee = 4;     // Sprites 32-39 (also used by bows for their attack)
+            public const int AttackBow = 5;       // Sprites 40-47 (unused in bow PAKs)
             public const int Running = 6;         // Sprites 48-55
         }
 
@@ -950,6 +1789,8 @@ namespace SpritePacker
             }
             else // Bow
             {
+                // Note: Bows store their attack animation at PAK index 4 (AttackMelee slot),
+                // not index 5 (AttackBow slot). This is how original HB bow PAKs are structured.
                 weaponMapping = new[]
                 {
                     WeaponAnimIndex.StandingPeace,   // 0: Standing Peace
@@ -959,7 +1800,7 @@ namespace SpritePacker
                     WeaponAnimIndex.Running,         // 4: Running
                     -1,                              // 5: Attack Peace (blank for bow)
                     -1,                              // 6: Attack Combat (blank for bow)
-                    WeaponAnimIndex.AttackBow,       // 7: Attack Bow
+                    WeaponAnimIndex.AttackMelee,     // 7: Attack Bow - bows use melee slot in PAK
                     -1,                              // 8: Attack Cast (always blank)
                     -1,                              // 9: Pickup (always blank)
                     -1,                              // 10: Take Damage (always blank)

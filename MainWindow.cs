@@ -288,7 +288,8 @@ namespace HBPakEditor
                                     string rectFileName = Path.GetFileName(Path.ChangeExtension(safeName, ".json"));
                                     rectFileName = rectFileName.Replace("_sprite_", "_rectangles_");
                                     string rectDestPath = Path.Combine(fbd.SelectedPath, rectFileName);
-                                    File.WriteAllText(rectDestPath, JsonConvert.SerializeObject(sprite.Rectangles, Formatting.Indented));
+                                    var rects = sprite.Rectangles ?? new List<PAKLib.SpriteRectangle>();
+                                    File.WriteAllText(rectDestPath, JsonConvert.SerializeObject(rects, Formatting.Indented));
                                 }
                             }
                         }

@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+; HBPakEditor - Remove Context Menu Entries
+; Run this to remove the "Convert To PAK" context menu options
+
+[-HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAK]
+
+[-HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAKRects]

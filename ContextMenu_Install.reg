@@ -1,0 +1,23 @@
+Windows Registry Editor Version 5.00
+
+; HBPakEditor - Convert Directory to PAK Context Menu
+; Right-click on any folder to convert it to a PAK file
+;
+; IMPORTANT: Replace the path below with your actual HBPakEditor.exe location
+; Current placeholder: C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\publish\\HBPakEditor.exe
+
+; Convert To PAK (without rectangles)
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAK]
+@="Convert To PAK"
+"Icon"="C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\publish\\HBPakEditor.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAK\command]
+@="\"C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\publish\\HBPakEditor.exe\" import \"%V\" \"%V.pak\""
+
+; Convert To PAK (with rectangles)
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAKRects]
+@="Convert To PAK (Rectangles)"
+"Icon"="C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\publish\\HBPakEditor.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAKRects\command]
+@="\"C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\publish\\HBPakEditor.exe\" import \"%V\" \"%V.pak\" --rects"

@@ -1,0 +1,20 @@
+Windows Registry Editor Version 5.00
+
+; HBPakEditor - Convert Directory to PAK Context Menu (Development Build)
+; Points to the Debug build location
+
+; Convert To PAK (without rectangles)
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAK]
+@="Convert To PAK"
+"Icon"="C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\Debug\\net8.0-windows\\HBPakEditor.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAK\command]
+@="\"C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\Debug\\net8.0-windows\\HBPakEditor.exe\" import \"%V\" \"%V.pak\""
+
+; Convert To PAK (with rectangles)
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAKRects]
+@="Convert To PAK (Rectangles)"
+"Icon"="C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\Debug\\net8.0-windows\\HBPakEditor.exe"
+
+[HKEY_CLASSES_ROOT\Directory\shell\HBPakEditor_ConvertToPAKRects\command]
+@="\"C:\\Users\\ShadowEvil\\source\\repos\\HBPakEditor\\bin\\Debug\\net8.0-windows\\HBPakEditor.exe\" import \"%V\" \"%V.pak\" --rects"

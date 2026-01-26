@@ -665,7 +665,7 @@ namespace HBPakEditor
                 var sprite = OpenPAK.Data.Sprites[reference.SpriteIndex];
                 SpriteRectangle[]? rectangles = null;
                 if(exportRectangles)
-                    rectangles = OpenPAK.Data.Sprites[reference.SpriteIndex].Rectangles.ToArray();
+                    rectangles = (OpenPAK.Data.Sprites[reference.SpriteIndex].Rectangles ?? new List<SpriteRectangle>()).ToArray();
                 var pakname = Path.GetFileNameWithoutExtension(FilePath ?? "new");
                 if (sprite != null)
                 {
