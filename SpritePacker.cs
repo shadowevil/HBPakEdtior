@@ -57,6 +57,14 @@ namespace SpritePacker
         BMP
     }
 
+    public enum ItemModeType
+    {
+        None,
+        Melee,  // Sword, Axe, Staff - uses Attack index 4 for slots 5 & 6
+        Bow,    // Bow, Crossbow - uses Attack index 5 for slot 7
+        Shield  // Shield - 7 sprites reordered to 12 armor format
+    }
+
     public class SpritePackerForm : Form
     {
         // Packing parameters
@@ -111,6 +119,17 @@ namespace SpritePacker
         private SourceMode sourceMode = SourceMode.Directory;
         private PackingMethod packingMethod = PackingMethod.RowAligned;
         private PAK sourcePAK;
+
+        // Item mode
+        private ItemModeType itemMode = ItemModeType.None;
+        private CheckBox itemModeCheckbox;
+        private GroupBox itemModeGroup;
+        private RadioButton meleeRadio;
+        private RadioButton bowRadio;
+        private RadioButton shieldRadio;
+
+        // Clear existing sprites flag (set by confirmation dialog)
+        public bool ClearExistingSprites { get; private set; } = false;
 
         public SpritePackerForm() : this(SourceMode.Directory, null, "packed")
         {
@@ -196,12 +215,13 @@ namespace SpritePacker
             var settingsLayout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 9,
+                ColumnCount = 10,
                 RowCount = 1,
                 AutoSize = false
             };
 
             settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 190));  // Packing group
+            settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 310));  // Item mode group
             settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // Grid checkbox
             settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // Max W label
             settingsLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 85));  // Max W input
@@ -246,6 +266,55 @@ namespace SpritePacker
 
             packingMethodGroup.Controls.Add(rowAlignedRadio);
             packingMethodGroup.Controls.Add(tightCompactRadio);
+
+            // Item mode GroupBox (for PAK mode only)
+            itemModeGroup = new GroupBox
+            {
+                Text = "Item Mode",
+                Dock = DockStyle.Fill,
+                Visible = mode == SourceMode.PAK
+            };
+
+            itemModeCheckbox = new CheckBox
+            {
+                Text = "Enable",
+                AutoSize = true,
+                Location = new Point(8, centerInGroupbox)
+            };
+            itemModeCheckbox.CheckedChanged += ItemModeCheckbox_CheckedChanged;
+
+            meleeRadio = new RadioButton
+            {
+                Text = "Melee",
+                AutoSize = true,
+                Checked = true,
+                Location = new Point(85, centerInGroupbox),
+                Enabled = false
+            };
+            meleeRadio.CheckedChanged += ItemModeType_CheckedChanged;
+
+            bowRadio = new RadioButton
+            {
+                Text = "Bow",
+                AutoSize = true,
+                Location = new Point(160, centerInGroupbox),
+                Enabled = false
+            };
+            bowRadio.CheckedChanged += ItemModeType_CheckedChanged;
+
+            shieldRadio = new RadioButton
+            {
+                Text = "Shield",
+                AutoSize = true,
+                Location = new Point(225, centerInGroupbox),
+                Enabled = false
+            };
+            shieldRadio.CheckedChanged += ItemModeType_CheckedChanged;
+
+            itemModeGroup.Controls.Add(itemModeCheckbox);
+            itemModeGroup.Controls.Add(meleeRadio);
+            itemModeGroup.Controls.Add(bowRadio);
+            itemModeGroup.Controls.Add(shieldRadio);
 
             gridModeCheckbox = new CheckBox
             {
@@ -326,14 +395,15 @@ namespace SpritePacker
             }
 
             settingsLayout.Controls.Add(packingMethodGroup, 0, 0);
-            settingsLayout.Controls.Add(gridModeCheckbox, 1, 0);
-            settingsLayout.Controls.Add(maxWidthLabel, 2, 0);
-            settingsLayout.Controls.Add(maxWidthInput, 3, 0);
-            settingsLayout.Controls.Add(maxHeightLabel, 4, 0);
-            settingsLayout.Controls.Add(maxHeightInput, 5, 0);
-            settingsLayout.Controls.Add(spacingLabel, 6, 0);
-            settingsLayout.Controls.Add(spacingInput, 7, 0);
-            settingsLayout.Controls.Add(repackButton, 8, 0);
+            settingsLayout.Controls.Add(itemModeGroup, 1, 0);
+            settingsLayout.Controls.Add(gridModeCheckbox, 2, 0);
+            settingsLayout.Controls.Add(maxWidthLabel, 3, 0);
+            settingsLayout.Controls.Add(maxWidthInput, 4, 0);
+            settingsLayout.Controls.Add(maxHeightLabel, 5, 0);
+            settingsLayout.Controls.Add(maxHeightInput, 6, 0);
+            settingsLayout.Controls.Add(spacingLabel, 7, 0);
+            settingsLayout.Controls.Add(spacingInput, 8, 0);
+            settingsLayout.Controls.Add(repackButton, 9, 0);
 
             settingsPanel.Controls.Add(settingsLayout);
 
@@ -388,6 +458,20 @@ namespace SpritePacker
                 };
                 primaryButton.Click += (s, e) =>
                 {
+                    // Ask if user wants to clear existing sprites
+                    var result = MessageBox.Show(
+                        "Do you want to clear the existing sprites and rectangles?\n\n" +
+                        "Yes = Replace all with compacted sprites\n" +
+                        "No = Append compacted sprites to existing\n" +
+                        "Cancel = Don't compact",
+                        "Clear Existing Sprites?",
+                        MessageBoxButtons.YesNoCancel,
+                        MessageBoxIcon.Question);
+
+                    if (result == System.Windows.Forms.DialogResult.Cancel)
+                        return;
+
+                    ClearExistingSprites = (result == System.Windows.Forms.DialogResult.Yes);
                     DialogResult = DialogResult.OK;
                     Close();
                 };
@@ -446,6 +530,50 @@ namespace SpritePacker
                 packingMethod = PackingMethod.RowAligned;
             else if (tightCompactRadio.Checked)
                 packingMethod = PackingMethod.TightCompact;
+        }
+
+        private void ItemModeCheckbox_CheckedChanged(object? sender, EventArgs e)
+        {
+            bool enabled = itemModeCheckbox.Checked;
+            meleeRadio.Enabled = enabled;
+            bowRadio.Enabled = enabled;
+            shieldRadio.Enabled = enabled;
+
+            if (enabled)
+            {
+                if (meleeRadio.Checked)
+                    itemMode = ItemModeType.Melee;
+                else if (bowRadio.Checked)
+                    itemMode = ItemModeType.Bow;
+                else if (shieldRadio.Checked)
+                    itemMode = ItemModeType.Shield;
+                // Disable other packing options when item mode is active (but keep spacing)
+                packingMethodGroup.Enabled = false;
+                gridModeCheckbox.Enabled = false;
+                maxWidthInput.Enabled = false;
+                maxHeightInput.Enabled = false;
+                // spacingInput stays enabled for item mode
+            }
+            else
+            {
+                itemMode = ItemModeType.None;
+                packingMethodGroup.Enabled = true;
+                gridModeCheckbox.Enabled = true;
+                maxWidthInput.Enabled = true;
+                maxHeightInput.Enabled = true;
+            }
+        }
+
+        private void ItemModeType_CheckedChanged(object? sender, EventArgs e)
+        {
+            if (!itemModeCheckbox.Checked) return;
+
+            if (meleeRadio.Checked)
+                itemMode = ItemModeType.Melee;
+            else if (bowRadio.Checked)
+                itemMode = ItemModeType.Bow;
+            else if (shieldRadio.Checked)
+                itemMode = ItemModeType.Shield;
         }
 
         public void LoadFromPAK(PAK pak, string prefix = "packed")
@@ -698,6 +826,463 @@ namespace SpritePacker
 
         #endregion
 
+        #region Item Mode Processing
+
+        /// <summary>
+        /// Weapon PAK sprite indices (each has 8 direction frames)
+        /// </summary>
+        private static class WeaponAnimIndex
+        {
+            public const int StandingPeace = 0;   // Sprites 0-7
+            public const int StandingCombat = 1;  // Sprites 8-15
+            public const int WalkingPeace = 2;    // Sprites 16-23
+            public const int WalkingCombat = 3;   // Sprites 24-31
+            public const int AttackMelee = 4;     // Sprites 32-39
+            public const int AttackBow = 5;       // Sprites 40-47
+            public const int Running = 6;         // Sprites 48-55
+        }
+
+        /// <summary>
+        /// Armor output sprite sheet indices
+        /// </summary>
+        private static class ArmorAnimIndex
+        {
+            public const int StandingPeace = 0;
+            public const int StandingCombat = 1;
+            public const int WalkingPeace = 2;
+            public const int WalkingCombat = 3;
+            public const int Running = 4;
+            public const int AttackPeace = 5;
+            public const int AttackCombat = 6;
+            public const int AttackBow = 7;
+            public const int AttackCast = 8;
+            public const int Pickup = 9;
+            public const int TakeDamage = 10;
+            public const int Dying = 11;
+        }
+
+        private static readonly string[] ArmorAnimNames = new[]
+        {
+            "Standing Peace", "Standing Combat", "Walking Peace", "Walking Combat",
+            "Running", "Attack Peace", "Attack Combat", "Attack Bow",
+            "Attack Cast", "Pickup", "Take Damage", "Dying"
+        };
+
+        /// <summary>
+        /// Creates a blank 100x100 sprite with "NOT USED" text
+        /// </summary>
+        private Bitmap CreateBlankSprite()
+        {
+            const int size = 100;
+            var bitmap = new Bitmap(size, size, GetPixelFormat());
+
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(GetBackgroundColor());
+
+                // Draw "NOT USED" text - use smaller font to ensure it fits
+                using var font = new Font("Arial", 9, FontStyle.Bold);
+                using var brush = new SolidBrush(Color.Gray);
+                var text = "NOT USED";
+                var textSize = g.MeasureString(text, font);
+                float x = (size - textSize.Width) / 2;
+                float y = (size - textSize.Height) / 2;
+                g.DrawString(text, font, brush, x, y);
+            }
+
+            return bitmap;
+        }
+
+        /// <summary>
+        /// Process weapon PAK sprites (56) into armor format (12 sheets)
+        /// Each output sheet is 8 rows (directions) × N columns (frames)
+        /// </summary>
+        private void ProcessItemMode()
+        {
+            if (loadedSheets.Count == 0) return;
+
+            // Shield mode has different processing (7 sprites → 12 sprites)
+            if (itemMode == ItemModeType.Shield)
+            {
+                ProcessShieldMode();
+                return;
+            }
+
+            // In PAK mode, each loadedSheet is one sprite with multiple rectangles (frames)
+            // Weapon PAK: 56 sprites = 7 animations × 8 directions
+            // Each sprite contains the frames for that animation+direction
+
+            // Validate sprite count (should be 56 for weapons)
+            if (loadedSheets.Count < 56)
+            {
+                MessageBox.Show($"Item mode requires 56 sprites (7 animations × 8 directions).\nFound only {loadedSheets.Count} sprites.",
+                    "Invalid Sprite Count", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Clear existing packed sheets
+            tabControl.TabPages.Clear();
+            foreach (var packed in packedSheets)
+                packed.Image?.Dispose();
+            packedSheets.Clear();
+
+            // Define mapping from armor index to weapon index
+            // -1 means use blank sprite
+            // Note: In peace mode attacks, weapons are HIDDEN (not rendered) - body uses fist animation
+            int[] weaponMapping;
+            if (itemMode == ItemModeType.Melee)
+            {
+                weaponMapping = new[]
+                {
+                    WeaponAnimIndex.StandingPeace,   // 0: Standing Peace
+                    WeaponAnimIndex.StandingCombat,  // 1: Standing Combat
+                    WeaponAnimIndex.WalkingPeace,    // 2: Walking Peace
+                    WeaponAnimIndex.WalkingCombat,   // 3: Walking Combat
+                    WeaponAnimIndex.Running,         // 4: Running
+                    -1,                              // 5: Attack Peace (blank - weapon hidden in peace attacks)
+                    WeaponAnimIndex.AttackMelee,     // 6: Attack Combat (melee)
+                    -1,                              // 7: Attack Bow (blank for melee)
+                    -1,                              // 8: Attack Cast (always blank)
+                    -1,                              // 9: Pickup (always blank)
+                    -1,                              // 10: Take Damage (always blank)
+                    -1                               // 11: Dying (always blank)
+                };
+            }
+            else // Bow
+            {
+                weaponMapping = new[]
+                {
+                    WeaponAnimIndex.StandingPeace,   // 0: Standing Peace
+                    WeaponAnimIndex.StandingCombat,  // 1: Standing Combat
+                    WeaponAnimIndex.WalkingPeace,    // 2: Walking Peace
+                    WeaponAnimIndex.WalkingCombat,   // 3: Walking Combat
+                    WeaponAnimIndex.Running,         // 4: Running
+                    -1,                              // 5: Attack Peace (blank for bow)
+                    -1,                              // 6: Attack Combat (blank for bow)
+                    WeaponAnimIndex.AttackBow,       // 7: Attack Bow
+                    -1,                              // 8: Attack Cast (always blank)
+                    -1,                              // 9: Pickup (always blank)
+                    -1,                              // 10: Take Damage (always blank)
+                    -1                               // 11: Dying (always blank)
+                };
+            }
+
+            // Create blank sprite for unused slots
+            using var blankSprite = CreateBlankSprite();
+
+            // Process each of the 12 armor animation slots
+            for (int armorIdx = 0; armorIdx < 12; armorIdx++)
+            {
+                int weaponIdx = weaponMapping[armorIdx];
+
+                Bitmap sheetBitmap;
+                var outputRects = new List<SpriteRectangle>();
+
+                if (weaponIdx < 0)
+                {
+                    // Create blank sheet with single 100x100 sprite, no rectangles
+                    sheetBitmap = new Bitmap(blankSprite);
+                    // No rectangles for blank sprites
+                }
+                else
+                {
+                    // Get the 8 direction sprites for this weapon animation
+                    // Weapon sprite index = animationIndex * 8 + direction
+                    var directionSheets = new List<SpriteSheet>();
+                    for (int dir = 0; dir < 8; dir++)
+                    {
+                        int spriteIdx = weaponIdx * 8 + dir;
+                        if (spriteIdx < loadedSheets.Count)
+                        {
+                            directionSheets.Add(loadedSheets[spriteIdx]);
+                        }
+                    }
+
+                    // Pack into 8 rows × N columns grid
+                    (sheetBitmap, outputRects) = PackSpritesGrid8xN(directionSheets);
+                }
+
+                packedSheets.Add(new PackedSheet
+                {
+                    Image = sheetBitmap,
+                    Rectangles = outputRects,
+                    SpriteCount = outputRects.Count
+                });
+
+                // Create tab with RenderedPanel
+                string tabName = $"{armorIdx}: {ArmorAnimNames[armorIdx]}";
+                if (weaponIdx < 0) tabName += " (BLANK)";
+
+                var tabPage = new TabPage(tabName);
+
+                var renderedPanel = new RenderedPanel
+                {
+                    Dock = DockStyle.Fill,
+                    BackColor = Color.FromArgb(40, 40, 40),
+                    ViewOnlyMode = true,
+                    ShowHotkeyLegend = true,
+                    CurrentBitmap = new Bitmap(sheetBitmap),
+                    DirectRectangles = outputRects.Select(r => new Rectangle(r.x, r.y, r.width, r.height)).ToList()
+                };
+                renderedPanel.ZoomStatusLabel = zoomLabel;
+
+                string formatStr = outputFormat == OutputFormat.BMP ? "BMP" : "PNG";
+                string spriteInfo = weaponIdx < 0 ? "BLANK (no rectangles)" : $"Sprites: {outputRects.Count}";
+                var infoLabel = new Label
+                {
+                    Dock = DockStyle.Top,
+                    Height = 25,
+                    Text = $"Size: {sheetBitmap.Width}x{sheetBitmap.Height} | {spriteInfo} | Format: {formatStr}",
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    BackColor = weaponIdx < 0 ? Color.FromArgb(80, 60, 60) : Color.FromArgb(60, 60, 60),
+                    ForeColor = Color.White,
+                    Font = new Font(Font.FontFamily, 9, FontStyle.Bold)
+                };
+
+                tabPage.Controls.Add(renderedPanel);
+                tabPage.Controls.Add(infoLabel);
+                tabControl.TabPages.Add(tabPage);
+            }
+
+            string modeStr = itemMode == ItemModeType.Melee ? "Melee" : "Bow";
+            statusLabel.Text = $"Item Mode ({modeStr}): Created 12 armor-format sheets from 56 weapon sprites";
+            repackButton.Enabled = true;
+            primaryButton.Enabled = true;
+            secondaryButton.Enabled = true;
+        }
+
+        /// <summary>
+        /// Shield PAK sprite indices (each has all frames: 8 dirs × N frames per dir)
+        /// Original 3.82 loads indices 0-6 (7 sprites per shield)
+        /// </summary>
+        private static class ShieldAnimIndex
+        {
+            public const int StandingPeace = 0;
+            public const int StandingCombat = 1;
+            public const int WalkingPeace = 2;
+            public const int WalkingCombat = 3;
+            public const int AttackMelee = 4;
+            public const int TakeDamage = 5;  // 4 frames per direction - used in OnDamage
+            public const int Running = 6;
+        }
+
+        /// <summary>
+        /// Process shield PAK sprites (7) into armor format (12 sheets)
+        /// Unlike weapons, shields already have all frames in each sprite
+        /// </summary>
+        private void ProcessShieldMode()
+        {
+            if (loadedSheets.Count == 0) return;
+
+            // Validate sprite count (should be 7 for shields)
+            if (loadedSheets.Count < 7)
+            {
+                MessageBox.Show($"Shield mode requires 7 sprites.\nFound only {loadedSheets.Count} sprites.",
+                    "Invalid Sprite Count", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            // Clear existing packed sheets
+            tabControl.TabPages.Clear();
+            foreach (var packed in packedSheets)
+                packed.Image?.Dispose();
+            packedSheets.Clear();
+
+            // Define mapping from armor index to shield index
+            // -1 means use blank sprite
+            // Shield indices: 0=StandPeace, 1=StandCombat, 2=WalkPeace, 3=WalkCombat, 4=AttackMelee, 5=TakeDamage, 6=Running
+            // Note: In peace mode attacks, weapons and shields are HIDDEN (not rendered)
+            // Note: Shields cannot be equipped with bows, so Attack Bow is blank
+            // Note: Shields not rendered during Pickup in 3.82
+            int[] shieldMapping = new[]
+            {
+                ShieldAnimIndex.StandingPeace,   // 0: Standing Peace
+                ShieldAnimIndex.StandingCombat,  // 1: Standing Combat
+                ShieldAnimIndex.WalkingPeace,    // 2: Walking Peace
+                ShieldAnimIndex.WalkingCombat,   // 3: Walking Combat
+                ShieldAnimIndex.Running,         // 4: Running
+                -1,                              // 5: Attack Peace (blank - shield hidden in peace attacks)
+                ShieldAnimIndex.AttackMelee,     // 6: Attack Combat (melee)
+                -1,                              // 7: Attack Bow (blank - shields not usable with bows)
+                -1,                              // 8: Attack Cast (blank - not rendered in 3.82)
+                -1,                              // 9: Pickup (blank - not rendered in 3.82)
+                ShieldAnimIndex.TakeDamage,      // 10: Take Damage (sprite 5 - used in OnDamage)
+                -1                               // 11: Dying (blank - not rendered in 3.82)
+            };
+
+            // Create blank sprite for unused slots
+            using var blankSprite = CreateBlankSprite();
+
+            // Process each of the 12 armor animation slots
+            for (int armorIdx = 0; armorIdx < 12; armorIdx++)
+            {
+                int shieldIdx = shieldMapping[armorIdx];
+
+                Bitmap sheetBitmap;
+                var outputRects = new List<SpriteRectangle>();
+
+                if (shieldIdx < 0)
+                {
+                    // Create blank sheet with single 100x100 sprite, no rectangles
+                    sheetBitmap = new Bitmap(blankSprite);
+                    // No rectangles for blank sprites
+                }
+                else
+                {
+                    // Get the shield sprite (already contains all direction frames)
+                    var sourceSheet = loadedSheets[shieldIdx];
+
+                    // Clone the sprite image and rectangles
+                    sheetBitmap = new Bitmap(sourceSheet.Image);
+                    outputRects = sourceSheet.Rectangles.Select(r => new SpriteRectangle
+                    {
+                        x = r.x,
+                        y = r.y,
+                        width = r.width,
+                        height = r.height,
+                        pivotX = r.pivotX,
+                        pivotY = r.pivotY
+                    }).ToList();
+                }
+
+                packedSheets.Add(new PackedSheet
+                {
+                    Image = sheetBitmap,
+                    Rectangles = outputRects,
+                    SpriteCount = outputRects.Count
+                });
+
+                // Create tab with RenderedPanel
+                string tabName = $"{armorIdx}: {ArmorAnimNames[armorIdx]}";
+                if (shieldIdx < 0) tabName += " (BLANK)";
+
+                var tabPage = new TabPage(tabName);
+
+                var renderedPanel = new RenderedPanel
+                {
+                    Dock = DockStyle.Fill,
+                    BackColor = Color.FromArgb(40, 40, 40),
+                    ViewOnlyMode = true,
+                    ShowHotkeyLegend = true,
+                    CurrentBitmap = new Bitmap(sheetBitmap),
+                    DirectRectangles = outputRects.Select(r => new Rectangle(r.x, r.y, r.width, r.height)).ToList()
+                };
+                renderedPanel.ZoomStatusLabel = zoomLabel;
+
+                string formatStr = outputFormat == OutputFormat.BMP ? "BMP" : "PNG";
+                string spriteInfo = shieldIdx < 0 ? "BLANK (no rectangles)" : $"Sprites: {outputRects.Count}";
+                var infoLabel = new Label
+                {
+                    Dock = DockStyle.Top,
+                    Height = 25,
+                    Text = $"Size: {sheetBitmap.Width}x{sheetBitmap.Height} | {spriteInfo} | Format: {formatStr}",
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    BackColor = shieldIdx < 0 ? Color.FromArgb(80, 60, 60) : Color.FromArgb(60, 60, 60),
+                    ForeColor = Color.White,
+                    Font = new Font(Font.FontFamily, 9, FontStyle.Bold)
+                };
+
+                tabPage.Controls.Add(renderedPanel);
+                tabPage.Controls.Add(infoLabel);
+                tabControl.TabPages.Add(tabPage);
+            }
+
+            statusLabel.Text = $"Item Mode (Shield): Created 12 armor-format sheets from 7 shield sprites";
+            repackButton.Enabled = true;
+            primaryButton.Enabled = true;
+            secondaryButton.Enabled = true;
+        }
+
+        /// <summary>
+        /// Pack sprites tightly - 8 directions stacked vertically, frames packed horizontally
+        /// No column/row alignment - each frame is placed immediately after the previous
+        /// </summary>
+        private (Bitmap bitmap, List<SpriteRectangle> rectangles) PackSpritesGrid8xN(List<SpriteSheet> directionSheets)
+        {
+            if (directionSheets.Count == 0)
+                return (new Bitmap(1, 1, GetPixelFormat()), new List<SpriteRectangle>());
+
+            var outputRects = new List<SpriteRectangle>();
+
+            // Calculate row heights and max width for each direction
+            var rowHeights = new int[8];
+            var rowWidths = new int[8];
+
+            for (int dir = 0; dir < 8 && dir < directionSheets.Count; dir++)
+            {
+                var sheet = directionSheets[dir];
+                int maxHeight = 0;
+                int rowWidth = 0;
+
+                for (int frame = 0; frame < sheet.Rectangles.Count; frame++)
+                {
+                    var rect = sheet.Rectangles[frame];
+                    maxHeight = Math.Max(maxHeight, rect.height);
+                    rowWidth += rect.width;
+                    if (frame < sheet.Rectangles.Count - 1)
+                        rowWidth += spacing;
+                }
+
+                rowHeights[dir] = maxHeight;
+                rowWidths[dir] = rowWidth;
+            }
+
+            // Calculate total dimensions
+            int totalWidth = rowWidths.Max();
+            int totalHeight = rowHeights.Sum() + (7 * spacing); // 7 gaps between 8 rows
+
+            if (totalWidth <= 0) totalWidth = 1;
+            if (totalHeight <= 0) totalHeight = 1;
+
+            var bitmap = new Bitmap(totalWidth, totalHeight, GetPixelFormat());
+            using (var g = Graphics.FromImage(bitmap))
+            {
+                g.Clear(GetBackgroundColor());
+                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+
+                int currentY = 0;
+
+                // Process each direction (row)
+                for (int dir = 0; dir < 8 && dir < directionSheets.Count; dir++)
+                {
+                    var sheet = directionSheets[dir];
+                    int currentX = 0;
+
+                    // Process each frame - pack tightly
+                    for (int frame = 0; frame < sheet.Rectangles.Count; frame++)
+                    {
+                        var sourceRect = sheet.Rectangles[frame];
+
+                        // Draw the frame
+                        var sourceRegion = new Rectangle(sourceRect.x, sourceRect.y, sourceRect.width, sourceRect.height);
+                        g.DrawImage(sheet.Image,
+                            new Rectangle(currentX, currentY, sourceRect.width, sourceRect.height),
+                            sourceRegion, GraphicsUnit.Pixel);
+
+                        // Add rectangle for this frame
+                        outputRects.Add(new SpriteRectangle
+                        {
+                            x = currentX,
+                            y = currentY,
+                            width = sourceRect.width,
+                            height = sourceRect.height,
+                            pivotX = sourceRect.pivotX,
+                            pivotY = sourceRect.pivotY
+                        });
+
+                        currentX += sourceRect.width + spacing;
+                    }
+
+                    currentY += rowHeights[dir] + spacing;
+                }
+            }
+
+            return (bitmap, outputRects);
+        }
+
+        #endregion
+
         #region Packing Logic
 
         private void ClearAll()
@@ -779,6 +1364,13 @@ namespace SpritePacker
 
         private void PackSpritesFromLoaded()
         {
+            // Check if item mode is enabled
+            if (itemMode != ItemModeType.None)
+            {
+                ProcessItemMode();
+                return;
+            }
+
             tabControl.TabPages.Clear();
 
             foreach (var packed in packedSheets)

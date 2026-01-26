@@ -710,6 +710,10 @@ namespace HBPakEditor
                 darkMode.ThemeControl(compact);
                 if(compact.ShowDialog(this) == DialogResult.OK)
                 {
+                    if (compact.ClearExistingSprites)
+                    {
+                        tab.OpenPAK!.Data.Sprites.Clear();
+                    }
                     tab.OpenPAK!.Data.Sprites.AddRange(compact.GetSprites());
                     tab.PopulateTreeItems();
                     pakTabControl.SetTabDirty(tab, true);
